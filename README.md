@@ -126,16 +126,47 @@ Three tiers, calibrated against a fixed-strength reference driver across 22 circ
 
 | Tier | vs. reference driver | Feel |
 |---|---|---|
-| ROOKIE | +1.92 s/lap slower | ~6s cushion over three laps |
-| PRO | +0.10 s/lap | dead even — a real fight |
-| ACE | −0.91 s/lap faster | you need drift and boost to win |
+| ROOKIE | +1.16 s/lap slower | a cushion, but you still have to drive |
+| PRO | −0.14 s/lap | dead even — a real fight |
+| ACE | −0.74 s/lap faster | you need drift, tow and boost to win |
 
 Skill affects **execution**, not just ambition. An early version scaled only planned corner speed
 (`latGrip`), which made higher tiers *slower* on tight circuits — they demanded grip that wasn't
 there, ran wide, and lost more than the ambition gained. Measuring the lateral acceleration the car
 actually pulls (`v · yawRate`: p50 14.8, p90 26.7, p95 28.9 m/s²) showed ACE was planning at the
 p95 — achievable 5% of the time. Planned grip is now capped below p90, and skill instead buys
-tighter line-holding plus a wide-running recovery term. Verified monotonic on 22/22 circuits.
+tighter line-holding plus a wide-running recovery term.
+
+Measured over 10 circuits × 3 tiers, averaging **3 wander-phase realisations each**: 9/10 monotonic,
+1.91 s/lap average ROOKIE→ACE spread. An earlier single-realisation run reported 22/22 and 2.84 s —
+those figures were optimistic. Each rival draws a random wander phase per page load, which moves a
+lap time by ~0.1–0.2 s, and on circuits where two tiers sit close together that is enough to flip
+the ordering. Any tier comparison has to average over several realisations to mean anything.
+
+### Slipstream
+
+Tuck in behind another car — within ~30 m and ~3.4 m laterally — and you punch into their hole in
+the air: extra drive under throttle, thinner aero drag, and a slightly higher terminal speed. It
+only bites above ~65 km/h and only under power, so it rewards committing to a tow rather than
+lifting. A meter on the HUD shows its strength; the screen streaks and the air noise rises with it.
+
+The tuning is measured rather than guessed, and the first guess was wrong. An aggressive setting
+(accel 8.5, +5.5% top speed, AI holding station at 0.22) raised overtaking but **spread the field
+from 4.98 s to 6.40 s** — the tow let cars close up, then the AI sat in it instead of passing and
+arrived off-line at the next corner, a slipstream train. A 10-seed parameter sweep found exactly one
+setting that beats no-slipstream on field spread, gap to the leader *and* lead changes at the same
+time:
+
+| | Field spread | Gap 1st→2nd | Lead changes |
+|---|---|---|---|
+| off | 4.98 s | 2.20 s | 4.4 |
+| **shipped** | **4.66 s** | **2.19 s** | **5.1** |
+| too strong | 5.95 s | 2.14 s | 5.4 |
+
+Rivals use it too — they ease off avoidance while tucked in on a straight, then slingshot past with
+boost. Difficulty ordering is unaffected (10/10 monotonic with it on, 9/10 with it off).
+
+Live-tunable at `__rush.TOW` if you want to feel the difference yourself.
 
 ### Results: projected finishes, not DNF
 

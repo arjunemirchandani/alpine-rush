@@ -109,6 +109,13 @@
   #bl.full .seg.on{ background:var(--mg); box-shadow:0 0 14px rgba(255,62,165,.95); }
   #bl.full #boostlbl{ color:var(--mg); animation:pulse .6s ease-in-out infinite; }
   @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.42} }
+  #towrow{ display:flex; align-items:center; gap:9px; margin-top:9px; }
+  #towrow .lbl{ transition:color .12s, text-shadow .12s; white-space:nowrap; }
+  #towbar{ flex:1; height:5px; background:rgba(53,230,255,.10); border:1px solid rgba(53,230,255,.16); }
+  #towbar i{ display:block; height:100%; width:0%; background:var(--gn);
+             box-shadow:0 0 10px rgba(102,255,168,.9); transition:width .09s linear; }
+  #bl.tow #towlbl{ color:var(--gn); text-shadow:0 0 12px rgba(102,255,168,.8); }
+  #bl.tow #towbar{ border-color:rgba(102,255,168,.5); }
   #scorerow{ display:flex; justify-content:space-between; align-items:baseline; margin-top:9px; }
   #score{ font-size:19px; color:var(--gn); text-shadow:0 0 12px rgba(102,255,168,.5); font-variant-numeric:tabular-nums; }
 
@@ -253,6 +260,10 @@
   <div id="bl" class="panel">
     <div class="lbl" id="boostlbl">Boost — hold SHIFT</div>
     <div id="boostbar"></div>
+    <div id="towrow">
+      <span class="lbl" id="towlbl">Slipstream</span>
+      <div id="towbar"><i></i></div>
+    </div>
     <div id="scorerow">
       <span class="lbl">Score</span>
       <span id="score" class="val">0</span>
@@ -1239,6 +1250,7 @@ const Sfx = {
     this.screech = this.makeLoop(buf, 'bandpass', 1500, 1.7);
     this.rumble  = this.makeLoop(buf, 'lowpass', 240, 0.9);
     this.wind    = this.makeLoop(buf, 'highpass', 520, 0.6);
+    this.tow     = this.makeLoop(buf, 'bandpass', 420, 0.9);
     this.ok = true;
   },
 
@@ -1390,6 +1402,15 @@ function readInput(dt) {
 
 /* ------------------------- 15. the car --------------------------------- */
 const ENGINE = 27, BRAKE_A = 42, REVERSE_A = 9, BASE_YAW = 1.95;
+// Slipstream: the hole in the air behind another car.
+// Live-tunable via __rush.TOW so it can be A/B'd without an edit-reload cycle.
+//
+// These numbers are measured, not guessed. A first pass at accel 8.5 / vmax .055 /
+// aiHold .22 raised overtaking but SPREAD the field (4.98s -> 6.40s) — the tow let
+// cars close up, then the AI sat in it instead of passing, arriving off-line at the
+// next corner. A 10-seed sweep found this the only setting that beats no-slipstream
+// on field spread, gap to the leader AND lead changes simultaneously.
+const TOW = { range: 30, width: 3.4, accel: 5, vmax: 0.025, drag: 0.4, aiHold: 0.6 };
 const GEARS = [13, 24, 37, 50, 63, 999];
 
 const _v = new THREE.Vector3(), _n = new THREE.Vector3(), _q1 = new THREE.Quaternion(), _q2 = new THREE.Quaternion();
@@ -1411,6 +1432,7 @@ class Car {
     this.boosting = false; this.onTrack = true;
     this.groundY = 0; this.normal = new THREE.Vector3(0, 1, 0);
     this.wheelSpin = 0; this.lean = 0;
+    this.tow = 0; this.towCar = null;
     this.gear = 0; this.rpm = 0.15;
     this.ctl = { steer: 0, throttle: 0, brake: 0, hand: false, boost: false };
     this.lastSkid = [null, null];
@@ -1436,6 +1458,7 @@ class Car {
     // derived fields too, or the HUD flashes the previous race's speed for a frame
     this.speed = this.drift = this.wheelSpin = this.lean = this.offTime = this.driftHold = 0;
     this.gear = 0; this.rpm = 0.15; this.boosting = this.drifting = false;
+    this.tow = 0; this.towCar = null;
     this.ctl.steer = this.ctl.throttle = this.ctl.brake = 0;
     this.ctl.hand = this.ctl.boost = false;
     this.lastSkid = [null, null];
@@ -1463,18 +1486,38 @@ class Car {
     const wantBoost = c.boost && this.boostMeter > 0.02 && running;
     this.boosting = wantBoost;
 
+    // ---- slipstream: tuck in behind someone and the air gets easier
+    let tow = 0, towCar = null;
+    if (onTrack && vL > 18) {
+      for (const o of cars) {
+        if (o === this) continue;
+        const dx = o.pos.x - this.pos.x, dz = o.pos.z - this.pos.z;
+        const ahead = dx * fx + dz * fz;                      // along my nose
+        if (ahead < 3.2 || ahead > TOW.range) continue;
+        const side = Math.abs(dx * rx + dz * rz);
+        if (side > TOW.width) continue;
+        // strongest right behind them and dead centre, fading with both
+        const t = (1 - (ahead - 3.2) / (TOW.range - 3.2)) * (1 - side / TOW.width);
+        if (t > tow) { tow = t; towCar = o; }
+      }
+      tow *= clamp((vL - 18) / 27, 0, 1);                    // only bites at speed
+    }
+    this.tow = tow; this.towCar = towCar;
+
     // ---- longitudinal
-    const vmax = TOP_SPEED * (wantBoost ? 1.16 : 1) * (onTrack ? 1 : 0.6) * (this.speedMul || 1);
+    const vmax = TOP_SPEED * (wantBoost ? 1.16 : 1) * (onTrack ? 1 : 0.6)
+               * (this.speedMul || 1) * (1 + TOW.vmax * tow);
     let acc = 0;
     if (running) {
       if (c.throttle > 0) acc += ENGINE * c.throttle * Math.max(0, 1 - Math.max(0, vL) / vmax);
       if (wantBoost) acc += 21;
+      if (c.throttle > 0) acc += TOW.accel * tow;            // the tow only pulls under power
       if (c.brake > 0) acc -= (vL > 0.6 ? BRAKE_A : REVERSE_A) * c.brake;
     }
     vL += acc * dt;
     if (vL > vmax) vL = vmax;
     vL *= Math.exp(-(onTrack ? 0.11 : 1.35) * dt);          // roll + snow drag
-    vL -= Math.sign(vL) * 0.0011 * vL * vL * dt;            // aero
+    vL -= Math.sign(vL) * 0.0011 * vL * vL * (1 - TOW.drag * tow) * dt;  // aero, thinned by the tow
 
     // ---- lateral grip: the whole drift model lives here
     let grip = onTrack ? 5.4 : 2.1;
@@ -1582,7 +1625,7 @@ class Car {
       hint: this.hint, prevS: this.prevS, laps: this.laps, progress: this.progress,
       s: this.s, lat: this.lat, boostMeter: this.boostMeter, boosting: this.boosting,
       onTrack: this.onTrack, groundY: this.groundY, wheelSpin: this.wheelSpin,
-      lean: this.lean, gear: this.gear, rpm: this.rpm, drifting: this.drifting,
+      lean: this.lean, gear: this.gear, rpm: this.rpm, drifting: this.drifting, tow: this.tow,
       finished: this.finished, finishTime: this.finishTime, best: this.best,
       lapStart: this.lapStart, lapTimes: this.lapTimes.slice(),
       offTime: this.offTime, driftHold: this.driftHold, ctl: { ...this.ctl }
@@ -1595,7 +1638,7 @@ class Car {
     for (const f of ['vx','vz','yaw','yawRate','vLong','vLat','speed','drift','hint','prevS',
                      'laps','progress','s','lat','boostMeter','boosting','onTrack','groundY',
                      'wheelSpin','lean','gear','rpm','drifting','finished','finishTime','best',
-                     'lapStart','offTime','driftHold']) this[f] = k[f];
+                     'lapStart','offTime','driftHold','tow']) this[f] = k[f];
     this.lastSkid = [null, null];
   }
 
@@ -1610,16 +1653,20 @@ class Car {
     const wander = Math.sin(Game.now * this.wf + this.wp) * (1 - this.skill) * 4.2;
     let off = a.off * this.lineBias + wander;
 
-    // don't drive through people
+    // don't drive through people — but do sit in their tow on the straights
     let avoid = 0;
     const sy = Math.sin(this.yaw), cy = Math.cos(this.yaw);
+    const onStraight = Math.abs(atDist(this.s + 20).k) < 0.0038;
     for (const o of all) {
       if (o === this) continue;
       const dx = o.pos.x - this.pos.x, dz = o.pos.z - this.pos.z;
       const fwd = dx * sy + dz * cy, side = dx * cy - dz * sy;
       if (fwd > 1 && fwd < 24 && Math.abs(side) < 4.4) {
         const urgency = (1 - fwd / 24) * (1 - Math.abs(side) / 4.4);
-        avoid -= Math.sign(side || 1) * urgency * 7.5 * this.aggro;
+        // Holding station in the tow beats going around early, so ease off the
+        // avoidance while tucked in and slingshot past once close enough.
+        const tucked = onStraight && fwd > 7 && sp > 30;
+        avoid -= Math.sign(side || 1) * urgency * 7.5 * this.aggro * (tucked ? TOW.aiHold : 1);
       }
     }
     const latErr = this.lat - a.off * this.lineBias;           // how wide of the line we are
@@ -1665,6 +1712,8 @@ class Car {
     c.hand = this.driftHold > 0 && Math.abs(this.drift) < 0.7;
 
     c.boost = this.boostMeter > 0.30 && k < 0.0038 && sp > 28 && Math.abs(ang) < 0.22;
+    // slingshot: a good tow plus boost in hand is the moment to commit
+    if (this.tow > 0.45 && this.boostMeter > 0.25 && onStraight) c.boost = true;
   }
 
   /* ---------- visuals ---------- */
@@ -1743,6 +1792,18 @@ class Car {
         } else this.lastSkid[side > 0 ? 1 : 0] = null;
       }
     } else { this.lastSkid[0] = this.lastSkid[1] = null; }
+
+    // slipstream vapour: disturbed air peeling off the car ahead
+    if (this.tow > 0.18 && Math.random() < this.tow * 0.9) {
+      const o = this.towCar;
+      if (o) {
+        const m = 0.25 + Math.random() * 0.75;                  // somewhere along the gap
+        const vx = px + (o.pos.x - px) * m, vz = pz + (o.pos.z - pz) * m;
+        emit(vx + (Math.random() - 0.5) * 2.4, this.groundY + 0.5 + Math.random() * 1.1, vz,
+          -this.vx * 0.16, 0.5 + Math.random() * 0.7, -this.vz * 0.16,
+          0.7, 0.34, 0.72, 0.95, 0.85);
+      }
+    }
 
     // boost exhaust
     if (this.boosting && Math.random() < 0.8) {
@@ -1848,7 +1909,8 @@ const el = {
   hud: $('hud'), lap: $('lap'), time: $('time'), curlap: $('curlap'), bestlap: $('bestlap'),
   pos: $('pos'), stand: $('stand'), spdfill: $('spdfill'), spdnum: $('spdnum'), gear: $('gear'),
   bl: $('bl'), score: $('score'), count: $('count'), toast: $('toast'), pop: $('driftpop'),
-  lines: $('speedlines'), flash: $('flash'), dmg: $('dmg'), map: $('map')
+  lines: $('speedlines'), flash: $('flash'), dmg: $('dmg'), map: $('map'),
+  towfill: document.querySelector('#towbar i')
 };
 const boostSegs = [];
 for (let i = 0; i < 14; i++) { const d = document.createElement('div'); d.className = 'seg'; el.bl.querySelector('#boostbar').appendChild(d); boostSegs.push(d); }
@@ -1948,7 +2010,12 @@ function updateHUD(dt) {
   }
   el.score.textContent = (bankedScore + Math.round(driftScore)).toLocaleString();
 
-  el.lines.style.opacity = String(clamp((p.speed / TOP_SPEED - 0.55) * 1.5, 0, 1) * (p.boosting ? 1 : 0.5));
+  const tow = p.tow || 0;
+  el.towfill.style.width = (tow * 100).toFixed(0) + '%';
+  el.bl.classList.toggle('tow', tow > 0.12);
+
+  el.lines.style.opacity = String(clamp(
+    clamp((p.speed / TOP_SPEED - 0.55) * 1.5, 0, 1) * (p.boosting ? 1 : 0.5) + tow * 0.55, 0, 1));
   if ((mapTick += dt) > 0.06) { mapTick = 0; drawMap(); }
 }
 function cmpRace(a, b) {
@@ -2219,6 +2286,7 @@ function frame() {
       Sfx.set(Sfx.screech, player.onTrack ? slip * 0.16 : 0, 1250 + slip * 900);
       Sfx.set(Sfx.rumble, player.onTrack ? 0 : clamp(player.speed / 40, 0, 1) * 0.2);
       Sfx.set(Sfx.wind, clamp(player.speed / TOP_SPEED, 0, 1) * 0.07);
+      Sfx.set(Sfx.tow, (player.tow || 0) * 0.085, 320 + (player.tow || 0) * 680);
     }
   }
 
@@ -2304,7 +2372,7 @@ requestAnimationFrame(() => {
 //   __rush.player.boostMeter = 1   -> fill the boost bar
 //   __rush.Game.respawn()          -> pop back onto the racing line
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
-                  applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS,
+                  applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
 </script>
 </body>
