@@ -440,6 +440,16 @@ const KMH         = 3.6;
 const UP          = new THREE.Vector3(0, 1, 0);
 
 /* ------------------------------ 1. math -------------------------------- */
+/* Physics-affecting randomness runs off a seeded stream. The only consumer is the
+   collision yaw kick, but it has to be reproducible: a drive test that sometimes
+   passes and sometimes fails would hand out different circuits for the same seed. */
+let physSeed = 12345;
+function resetPhys(s) { physSeed = (s >>> 0) || 1; }
+function physRnd() {
+  physSeed = (Math.imul(physSeed, 1664525) + 1013904223) >>> 0;
+  return physSeed / 4294967296;
+}
+
 const clamp  = (v, a, b) => v < a ? a : v > b ? b : v;
 const lerp   = (a, b, t) => a + (b - a) * t;
 const smooth = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
@@ -505,6 +515,7 @@ const CLASSIC = {
   time: 1                                                      // the original races at midday
 };
 let TRACK = CLASSIC, SEED = 'ALPINE';
+let simReady = false;              // flipped once cars and the sim loop exist
 
 function drawParams(rnd) {
   const pick = arr => arr[(rnd() * arr.length) | 0];
@@ -657,6 +668,8 @@ function generateTrack(seedStr) {
     return { ...measureTrack(), seed: SEED, attempts: 0, hour: TIMES[CLASSIC.time].name };
   }
   const rnd = mulberry32(strSeed(SEED));
+  const canDrive = simReady;                  // cars exist only after the module finishes
+  let tests = 0, best = null;
   // The hour comes off its own stream. Drawn inside drawParams it was the last
   // value of each candidate, and since the retry loop discards whole candidates
   // the surviving draw was badly skewed — 43% DUSK, 10% DAY over 120 seeds.
@@ -668,10 +681,24 @@ function generateTrack(seedStr) {
     TRACK.time = hour;
     buildCentreline();
     const m = measureTrack();
-    if (isDrivable(m)) return { ...m, seed: SEED, attempts: attempt, hour: TIMES[hour].name };
+    if (!isDrivable(m)) continue;               // geometrically illegal, cheap to reject
+
+    if (!canDrive || tests >= DRIVE.maxTests) {  // no sim available, or budget spent
+      return { ...m, seed: SEED, attempts: attempt, hour: TIMES[hour].name, drive: null };
+    }
+    tests++;
+    const d = driveTest();
+    if (d.ok) return { ...m, seed: SEED, attempts: attempt, tests, hour: TIMES[hour].name, drive: d };
+    // keep the least-bad one in case nothing comes back clean
+    if (!best || d.offPct < best.d.offPct) best = { params: TRACK, m, d, attempt };
+  }
+  if (best) {                                   // nothing clean: take the best we drove
+    TRACK = best.params; buildCentreline();
+    return { ...best.m, seed: SEED, attempts: best.attempt, tests, hour: TIMES[hour].name,
+             drive: best.d, bestEffort: true };
   }
   TRACK = CLASSIC; buildCentreline();                 // known-good fallback
-  return { ...measureTrack(), seed: SEED, attempts: -1, hour: TIMES[CLASSIC.time].name };
+  return { ...measureTrack(), seed: SEED, attempts: -1, hour: TIMES[CLASSIC.time].name, drive: null };
 }
 
 /* --------------------- 3. nearest-point queries ------------------------ */
@@ -1195,8 +1222,8 @@ function loadTrack(seedStr) {
   return trackInfo;
 }
 
-// first build — ?seed=XYZ in the URL picks the circuit
-loadTrack(new URLSearchParams(location.search).get('seed') || 'ALPINE');
+// The first build now happens at the very bottom, once the cars and the sim loop
+// exist, because generateTrack() drive-tests candidates before accepting them.
 
 /* ---------------------------- 10. cars --------------------------------- */
 function buildCar(color, accent) {
@@ -1784,11 +1811,12 @@ class Car {
       if (lt < this.best) this.best = lt;
       this.lapStart = now;
       if (this.laps >= LAPS) { this.finished = true; this.finishTime = now; Game.onFinish(this); }
-      else if (this === player) { Sfx.chime(); Game.lapFlash(lt); }
+      else if (this === player && !Game.testing) { Sfx.chime(); Game.lapFlash(lt); }
     }
   }
 
   respawn() {
+    this.respawnCount = (this.respawnCount || 0) + 1;
     const q = nearGlobal(this.pos.x, this.pos.z);
     const back = atDist(q.s - 8);
     this.pos.set(back.x, 0, back.z);
@@ -2246,6 +2274,7 @@ const Game = {
     cars.forEach((c, i) => c.placeOnGrid(i));   // slot 0 = back of the grid = player
     driftScore = driftRun = bankedScore = 0; driftMult = 1;
     this.raceTime = 0; this.finishOrder = []; this.projected = null;
+    resetPhys(0x9E3779B9);
     clearTimeout(this.resultTimer); this.resultCard = null;
     camPos.copy(player.pos).add(new THREE.Vector3(0, 6, -16));
     this.countdown = 3.0;
@@ -2299,6 +2328,7 @@ const Game = {
   },
 
   onFinish(car) {
+    if (this.testing) return;                   // drive test: no fanfare, no results card
     this.finishOrder.push(car);
     if (car === player) {
       const rank = cars.slice().sort(cmpRace).indexOf(player);
@@ -2431,6 +2461,61 @@ const Game = {
   }
 };
 
+/* ------------------ drive-testing a candidate circuit -------------------
+   measureTrack() proves a layout is geometrically legal. It cannot tell whether
+   it is any good to drive — the difficulty sweeps kept turning up circuits that
+   passed every geometric check and still had the field running wide 15% of the
+   lap. So a candidate that clears the geometry filter is then actually driven,
+   headlessly, and rejected if the AI cannot hold a clean line on it.
+
+   Everything here is deterministic: fixed difficulty, fixed wander phases, fixed
+   physics seed. The same circuit must always get the same verdict, or a seed
+   would produce different tracks on different machines. */
+const DRIVE = { seconds: 46, maxOffPct: 9, maxTests: 5, minProgress: 0.55 };
+
+function driveTest() {
+  const snaps = cars.map(c => c.snapshot());
+  const g = { state: Game.state, race: Game.raceTime, now: Game.now, auto: Game.autopilot,
+              order: Game.finishOrder.slice(), proj: Game.projected, testing: Game.testing };
+  const wander = cars.map(c => ({ wp: c.wp, wf: c.wf, rc: c.respawnCount || 0 }));
+  const savedDiff = diff;
+
+  Game.testing = true;
+  Game.autopilot = true;
+  diff = 1;                                  // always judged at PRO, not the player's pick
+  applyDifficulty();
+  cars.forEach((c, i) => {
+    c.placeOnGrid(i);
+    c.wp = i * 1.7; c.wf = 0.34 + i * 0.05;  // fixed phases: no per-session variation
+    c.respawnCount = 0;
+  });
+  resetPhys(0xA1F3C7);
+  Game.state = 'race'; Game.raceTime = 0; Game.now = 1000;
+  cars.forEach(c => c.lapStart = 0);
+
+  const start = cars.map(c => c.progress);
+  let frames = 0, off = 0;
+  Game.fastForward(DRIVE.seconds, () => {
+    frames++;
+    for (const c of cars) if (!c.onTrack) off++;
+  });
+  const offPct = 100 * off / frames / cars.length;
+  const respawns = cars.reduce((a, c) => a + (c.respawnCount || 0), 0);
+  const advanced = cars.map((c, i) => (c.progress - start[i]) / TOTAL);
+  const stalled = advanced.some(a => a < DRIVE.minProgress);
+
+  cars.forEach((c, i) => { c.restore(snaps[i]); c.wp = wander[i].wp; c.wf = wander[i].wf;
+                           c.respawnCount = wander[i].rc; });
+  Game.state = g.state; Game.raceTime = g.race; Game.now = g.now; Game.autopilot = g.auto;
+  Game.finishOrder = g.order; Game.projected = g.proj; Game.testing = g.testing;
+  diff = savedDiff; applyDifficulty();
+
+  return {
+    offPct: +offPct.toFixed(2), respawns, slowest: +Math.min(...advanced).toFixed(2),
+    ok: offPct <= DRIVE.maxOffPct && respawns === 0 && !stalled
+  };
+}
+
 /* car ↔ car contact */
 function collide() {
   for (let a = 0; a < cars.length; a++) for (let b = a + 1; b < cars.length; b++) {
@@ -2446,8 +2531,8 @@ function collide() {
       const j = rel * 0.62;
       A.vx += nx * j; A.vz += nz * j;
       B.vx -= nx * j; B.vz -= nz * j;
-      A.yawRate += (Math.random() - 0.5) * 0.7;
-      B.yawRate -= (Math.random() - 0.5) * 0.7;
+      A.yawRate += (physRnd() - 0.5) * 0.7;
+      B.yawRate -= (physRnd() - 0.5) * 0.7;
       if ((A === player || B === player) && Math.abs(rel) > 5) Game.hit(Math.abs(rel) * 0.7);
     }
   }
@@ -2558,10 +2643,13 @@ const seedIn = $('seedin'), trackInfoEl = $('trackinfo');
 function showTrackInfo() {
   const t = trackInfo;
   const shape = t.minCornerRadius < 60 ? 'TECHNICAL' : t.minCornerRadius < 95 ? 'BALANCED' : 'FAST';
+  const drive = !t.drive ? ''
+    : t.bestEffort ? ` · <span style="color:var(--am)">BEST OF ${t.tests} DRIVEN</span>`
+    : ` · <span style="color:var(--gn)">DRIVE-TESTED ${t.drive.offPct}% OFF</span>`;
   trackInfoEl.innerHTML =
     `<b>${(t.length / 1000).toFixed(2)} KM</b> · <b>${t.corners}</b> CORNERS · ` +
     `TIGHTEST <b>${Math.round(t.minCornerRadius)}M</b> · <b>${Math.round(t.straightPct)}%</b> FLAT OUT · ` +
-    `${shape} · <b>${t.time}</b>` + (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '');
+    `${shape} · <b>${t.time}</b>` + (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '') + drive;
   seedIn.value = t.seed;
   const u = new URL(location.href);
   if (t.seed === 'ALPINE') u.searchParams.delete('seed'); else u.searchParams.set('seed', t.seed);
@@ -2601,17 +2689,10 @@ $('quit').addEventListener('click', () => { $('pause').classList.add('hide'); Ga
 $('tomenu').addEventListener('click', () => Game.toMenu());
 $('tomenu2').addEventListener('click', () => Game.toMenu());
 
-// settle the grid and the minimap for the chosen circuit
-buildMap();
-cars.forEach((c, i) => c.placeOnGrid(i));
-cars.forEach(c => c.updateVisual(0.016, 0));
-camPos.set(player.pos.x - 18, player.pos.y + 9, player.pos.z - 22);
-camLook.copy(player.pos);
-camera.position.copy(camPos); camera.lookAt(camLook);
-drawMap();
+// Everything exists now, so candidates can be driven before being accepted.
+simReady = true;
+applySeed(new URLSearchParams(location.search).get('seed') || 'ALPINE');
 renderer.render(scene, camera);
-
-showTrackInfo();
 
 requestAnimationFrame(() => {
   $('load').style.display = 'none';
@@ -2624,6 +2705,7 @@ requestAnimationFrame(() => {
 //   __rush.Game.respawn()          -> pop back onto the racing line
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
+                  driveTest, DRIVE,
                   TIMES, applyTimeOfDay, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
 </script>

@@ -73,6 +73,30 @@ const LIMITS = { minRadius: 46, minR: 165, maxGrade: 0.27, len: [1650, 3000] };
 ```
 
 A candidate that fails any limit is discarded and the next is drawn from the same seeded stream.
+
+**Driven.** Geometry proves a layout is *legal*, not that it is any *good*. Circuits kept turning up
+that passed every geometric check and still had the field running wide for 10% of the lap. So a
+candidate that clears the geometry filter is then actually driven — the full grid, headless, one
+lap at PRO via `fastForward` — and rejected if the AI can't hold a clean line, gets stranded and
+respawns, or fails to complete the lap.
+
+The whole test is deterministic: fixed difficulty, fixed AI wander phases, and a seeded stream for
+the collision jitter, so the same seed always reaches the same verdict. A test that sometimes
+passed would hand out different circuits for the same seed.
+
+Over 28 seeds it is a tail-cutting filter rather than a broad improvement, which is what it should
+be — most circuits were already fine:
+
+| | Geometry only | Drive-tested |
+|---|---|---|
+| Mean time off-track | 4.12% | 3.68% |
+| Worst circuit | 10.56% | 8.57% |
+| Circuits over 9% | **2 of 28** | **0** |
+
+It costs ~1.07 drive tests per seed (about 60 ms), and importantly it does **not** homogenise the
+pool — across 30 seeds only the 2 bad circuits changed, and the range of length, corner count,
+tightest radius and flat-out percentage is identical before and after. It removes broken circuits
+without flattening demanding ones.
 Because the stream is deterministic, the same seed always walks the same sequence and accepts the
 same track. Over 66 test seeds: **zero fallbacks**, 4.7 draws on average, 15 at worst against a cap
 of 60. Generated circuits ranged 1.81–2.31 km with 6–11 corners and tightest radii of 46–104 m.
