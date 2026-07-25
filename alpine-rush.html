@@ -106,6 +106,10 @@
   #boostbar{ display:flex; gap:3px; height:19px; margin-top:6px; }
   .seg{ flex:1; background:rgba(53,230,255,.08); border:1px solid rgba(53,230,255,.16); transition:background .08s linear, box-shadow .08s linear; }
   .seg.on{ background:var(--cy); box-shadow:0 0 11px rgba(53,230,255,.85); border-color:transparent; }
+  .seg.reserve{ border-color:rgba(255,62,165,.35); }
+  .seg.reserve.on{ background:rgba(255,62,165,.55); box-shadow:0 0 8px rgba(255,62,165,.5); }
+  #bl.denied #boostlbl{ color:var(--mg); animation:denyflash .18s linear 3; }
+  @keyframes denyflash{ 0%,100%{opacity:1} 50%{opacity:.15} }
   #bl.full .seg.on{ background:var(--mg); box-shadow:0 0 14px rgba(255,62,165,.95); }
   #bl.full #boostlbl{ color:var(--mg); animation:pulse .6s ease-in-out infinite; }
   @keyframes pulse{ 0%,100%{opacity:1} 50%{opacity:.42} }
@@ -1410,6 +1414,10 @@ const ENGINE = 27, BRAKE_A = 42, REVERSE_A = 9, BASE_YAW = 1.95;
 // cars close up, then the AI sat in it instead of passing, arriving off-line at the
 // next corner. A 10-seed sweep found this the only setting that beats no-slipstream
 // on field spread, gap to the leader AND lead changes simultaneously.
+// Boost needs a real reserve to engage, and once engaged runs a minimum burst.
+// Without these a nearly-empty meter produced a sub-0.2s puff you could not feel,
+// which reads as "sometimes boost just doesn't work".
+const BOOST_MIN = 0.12, BOOST_BURST = 0.5, BOOST_DRAIN = 0.32;
 const TOW = { range: 30, width: 3.4, accel: 5, vmax: 0.025, drag: 0.4, aiHold: 0.6 };
 const GEARS = [13, 24, 37, 50, 63, 999];
 
@@ -1433,6 +1441,7 @@ class Car {
     this.groundY = 0; this.normal = new THREE.Vector3(0, 1, 0);
     this.wheelSpin = 0; this.lean = 0;
     this.tow = 0; this.towCar = null;
+    this.boostTimer = 0; this.boostRefused = false; this.boostDenied = 0; this.boostStarted = false;
     this.gear = 0; this.rpm = 0.15;
     this.ctl = { steer: 0, throttle: 0, brake: 0, hand: false, boost: false };
     this.lastSkid = [null, null];
@@ -1459,6 +1468,7 @@ class Car {
     this.speed = this.drift = this.wheelSpin = this.lean = this.offTime = this.driftHold = 0;
     this.gear = 0; this.rpm = 0.15; this.boosting = this.drifting = false;
     this.tow = 0; this.towCar = null;
+    this.boostTimer = 0; this.boostRefused = false; this.boostDenied = 0; this.boostStarted = false;
     this.ctl.steer = this.ctl.throttle = this.ctl.brake = 0;
     this.ctl.hand = this.ctl.boost = false;
     this.lastSkid = [null, null];
@@ -1483,7 +1493,19 @@ class Car {
     const onTrack = Math.abs(q.lat) < HALF_W + 0.8;
     this.onTrack = onTrack;
 
-    const wantBoost = c.boost && this.boostMeter > 0.02 && running;
+    // Hold to keep boosting while there is fuel; a tap still yields a full burst.
+    // Pressing with less than BOOST_MIN refuses outright and flags the HUD, rather
+    // than spending the last sliver on something imperceptible.
+    this.boostTimer = Math.max(0, this.boostTimer - dt);
+    if (running && c.boost && this.boostTimer <= 0) {
+      if (this.boostMeter >= BOOST_MIN) this.boostTimer = BOOST_BURST;
+      else if (!this.boostRefused) { this.boostDenied = 0.45; this.boostRefused = true; }
+    }
+    if (!c.boost) this.boostRefused = false;
+    this.boostDenied = Math.max(0, (this.boostDenied || 0) - dt);
+
+    const wantBoost = running && this.boostTimer > 0 && this.boostMeter > 0.005;
+    if (wantBoost && !this.boosting) this.boostStarted = true;      // edge, for the whoosh
     this.boosting = wantBoost;
 
     // ---- slipstream: tuck in behind someone and the air gets easier
@@ -1583,7 +1605,7 @@ class Car {
     if (running) {
       if (drifting) this.boostMeter += dt * (0.055 + Math.abs(this.drift) * 0.30) * (this.speed / 40);
       else if (this.speed > 40 && onTrack) this.boostMeter += dt * 0.05;
-      if (this.boosting) this.boostMeter -= dt * 0.42;
+      if (this.boosting) this.boostMeter -= dt * BOOST_DRAIN;
       this.boostMeter = clamp(this.boostMeter, 0, 1);
     }
 
@@ -1626,6 +1648,7 @@ class Car {
       s: this.s, lat: this.lat, boostMeter: this.boostMeter, boosting: this.boosting,
       onTrack: this.onTrack, groundY: this.groundY, wheelSpin: this.wheelSpin,
       lean: this.lean, gear: this.gear, rpm: this.rpm, drifting: this.drifting, tow: this.tow,
+      boostTimer: this.boostTimer, boostRefused: this.boostRefused, boostDenied: this.boostDenied,
       finished: this.finished, finishTime: this.finishTime, best: this.best,
       lapStart: this.lapStart, lapTimes: this.lapTimes.slice(),
       offTime: this.offTime, driftHold: this.driftHold, ctl: { ...this.ctl }
@@ -1638,7 +1661,8 @@ class Car {
     for (const f of ['vx','vz','yaw','yawRate','vLong','vLat','speed','drift','hint','prevS',
                      'laps','progress','s','lat','boostMeter','boosting','onTrack','groundY',
                      'wheelSpin','lean','gear','rpm','drifting','finished','finishTime','best',
-                     'lapStart','offTime','driftHold','tow']) this[f] = k[f];
+                     'lapStart','offTime','driftHold','tow',
+                     'boostTimer','boostRefused','boostDenied']) this[f] = k[f];
     this.lastSkid = [null, null];
   }
 
@@ -1909,7 +1933,7 @@ const el = {
   hud: $('hud'), lap: $('lap'), time: $('time'), curlap: $('curlap'), bestlap: $('bestlap'),
   pos: $('pos'), stand: $('stand'), spdfill: $('spdfill'), spdnum: $('spdnum'), gear: $('gear'),
   bl: $('bl'), score: $('score'), count: $('count'), toast: $('toast'), pop: $('driftpop'),
-  lines: $('speedlines'), flash: $('flash'), dmg: $('dmg'), map: $('map'),
+  lines: $('speedlines'), flash: $('flash'), dmg: $('dmg'), map: $('map'), boostlbl: $('boostlbl'),
   towfill: document.querySelector('#towbar i')
 };
 const boostSegs = [];
@@ -1992,8 +2016,16 @@ function updateHUD(dt) {
   });
 
   const lit = Math.round(p.boostMeter * boostSegs.length);
-  boostSegs.forEach((s, i) => s.classList.toggle('on', i < lit));
+  const reserve = Math.ceil(BOOST_MIN * boostSegs.length);   // below this, boost won't engage
+  boostSegs.forEach((s, i) => {
+    s.classList.toggle('on', i < lit);
+    s.classList.toggle('reserve', i < reserve);
+  });
   el.bl.classList.toggle('full', p.boostMeter > 0.985);
+  el.bl.classList.toggle('denied', p.boostDenied > 0);
+  el.boostlbl.textContent = p.boostDenied > 0 ? 'NEED MORE BOOST — DRIFT TO CHARGE'
+                          : p.boostMeter >= BOOST_MIN ? 'BOOST — HOLD SHIFT'
+                          : 'BOOST — CHARGING';
 
   // drift scoring
   if (p.drifting && p.onTrack && Game.state === 'race') {
@@ -2276,6 +2308,9 @@ function frame() {
     }
     snowGeo.attributes.position.needsUpdate = true;
 
+    if (player.boostStarted) { player.boostStarted = false; Sfx.boost(); }
+    if (player.boostDenied > 0.4) Sfx.burst(0.09, 0.05, 'bandpass', 900, 380, 4);   // "no fuel" blip
+
     // audio mix
     if (Sfx.ok && !Sfx.muted) {
       Sfx.engineUpdate(Sfx.engine, player.rpm, player.ctl.throttle, 0.34);
@@ -2294,11 +2329,7 @@ function frame() {
 }
 renderer.setAnimationLoop(frame);
 
-let wasBoosting = false;
-setInterval(() => {
-  if (player.boosting && !wasBoosting) Sfx.boost();
-  wasBoosting = player.boosting;
-}, 60);
+// (boost audio now fires from the physics edge in the frame loop, not a poll)
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && Game.state === 'race') Game.togglePause();
