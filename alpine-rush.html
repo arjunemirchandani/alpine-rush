@@ -1587,7 +1587,8 @@ class Car {
       }
     }
     const latErr = this.lat - a.off * this.lineBias;           // how wide of the line we are
-    off = clamp(off + avoid - clamp(latErr * 0.30, -4.5, 4.5), -(HALF_W - 2.2), HALF_W - 2.2);
+    const corr = 0.14 + this.skill * 0.30;                    // skill == holding the line, not just ambition
+    off = clamp(off + avoid - clamp(latErr * corr, -4.5, 4.5), -(HALF_W - 2.2), HALF_W - 2.2);
 
     const tx = a.x + a.rx * off, tz = a.z + a.rz * off;
     const ang = wrapPi(Math.atan2(tx - this.pos.x, tz - this.pos.z) - this.yaw);
@@ -1596,8 +1597,17 @@ class Car {
     // corner-speed planning
     const brakeZone = 14 + sp * sp / 46;
     const k = Math.max(maxKappa(this.s + 5, brakeZone), 0.0008);
-    const latGrip = 20 + this.skill * 8;
+    // Measured: the car actually pulls ~26.7 m/s^2 lateral at p90, 28.9 at p95.
+    // Planning above ~26 means demanding grip that mostly is not there, so the
+    // car runs wide and loses more than the ambition gains. Ceiling ~25.5 for
+    // the best drivers; their edge comes from line-holding and top speed.
+    const latGrip = 17.5 + this.skill * 8;
     let vT = Math.sqrt(latGrip / k);
+    // already wide? recover first. Without this, a high-skill driver plans an
+    // ambitious corner speed, runs wide, and plans the next one just as fast —
+    // which made PRO slower than ROOKIE on tight circuits.
+    const wide = clamp((Math.abs(this.lat) - (HALF_W - 3.5)) / 5, 0, 1);
+    vT *= 1 - wide * 0.26;
 
     // gentle rubber band so the pack stays entertaining
     let band = 1;
@@ -1719,9 +1729,9 @@ class Car {
 
 /* ---------------------------- 16. the grid ----------------------------- */
 const DIFF = [
-  { name: 'ROOKIE', skill: 0.62, speed: 0.90 },
+  { name: 'ROOKIE', skill: 0.55, speed: 0.88 },
   { name: 'PRO',    skill: 0.84, speed: 0.97 },
-  { name: 'ACE',    skill: 0.98, speed: 1.03 }
+  { name: 'ACE',    skill: 1.00, speed: 1.05 }
 ];
 let diff = 1;
 
@@ -2016,7 +2026,19 @@ const Game = {
     camMode = (camMode + 1) % CAMS.length;
     toast('CAM · ' + CAMS[camMode], 900, '#35e6ff');
   },
-  respawn() { if (this.state === 'race') { player.respawn(); toast('RESPAWN', 800, '#ff3ea5'); } }
+  respawn() { if (this.state === 'race') { player.respawn(); toast('RESPAWN', 800, '#ff3ea5'); } },
+
+  /* Run the simulation without rendering — for measuring balance offline.
+     Uses stepSim(), so it is the same physics the render loop runs. */
+  fastForward(seconds, sample) {
+    const dt = 1 / 60, n = Math.round(seconds / dt);
+    for (let i = 0; i < n; i++) {
+      this.now += dt;
+      if (this.autopilot) player.think(dt, cars);
+      stepSim(dt);
+      if (sample) sample(i);
+    }
+  }
 };
 
 /* car ↔ car contact */
@@ -2046,6 +2068,25 @@ const clock = new THREE.Clock();
 let acc = 0;
 const FIXED = 1 / 120;
 
+/* Physics advance, shared by the render loop and Game.fastForward() so that
+   headless measurements exercise exactly the same code path as real play. */
+function stepSim(dt) {
+  const running = Game.state === 'race' || Game.state === 'done';
+  if (running) Game.raceTime += dt * 1000;
+
+  for (const r of rivals) r.think(dt, cars);
+
+  acc += dt;
+  let steps = 0;
+  while (acc >= FIXED && steps < 8) {
+    for (const c of cars) c.step(FIXED, running);
+    collide();
+    acc -= FIXED; steps++;
+  }
+  if (steps === 8) acc = 0;
+  return running;
+}
+
 function frame() {
   const dt = Math.min(0.05, clock.getDelta());
   Game.now += dt;
@@ -2066,19 +2107,7 @@ function frame() {
     }
     if (Game.state === 'done') { player.ctl.throttle = 0; player.ctl.brake = 0.4; player.ctl.boost = false; }
 
-    const running = Game.state === 'race' || Game.state === 'done';
-    if (running) Game.raceTime += dt * 1000;
-
-    for (const r of rivals) r.think(dt, cars);
-
-    acc += dt;
-    let steps = 0;
-    while (acc >= FIXED && steps < 8) {
-      for (const c of cars) c.step(FIXED, running);
-      collide();
-      acc -= FIXED; steps++;
-    }
-    if (steps === 8) acc = 0;
+    const running = stepSim(dt);
 
     for (const c of cars) c.updateVisual(dt, Game.now);
     updateParticles(dt);

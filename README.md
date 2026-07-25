@@ -120,6 +120,23 @@ Two deliberately *unphysical* details make it feel good rather than punishing:
 - **Self-catch.** The aligning torque ramps up past ~50° of slip, so the car rescues itself
   instead of spinning. You can throw it in harder than you'd otherwise dare.
 
+### Difficulty
+
+Three tiers, calibrated against a fixed-strength reference driver across 22 circuits:
+
+| Tier | vs. reference driver | Feel |
+|---|---|---|
+| ROOKIE | +1.92 s/lap slower | ~6s cushion over three laps |
+| PRO | +0.10 s/lap | dead even — a real fight |
+| ACE | −0.91 s/lap faster | you need drift and boost to win |
+
+Skill affects **execution**, not just ambition. An early version scaled only planned corner speed
+(`latGrip`), which made higher tiers *slower* on tight circuits — they demanded grip that wasn't
+there, ran wide, and lost more than the ambition gained. Measuring the lateral acceleration the car
+actually pulls (`v · yawRate`: p50 14.8, p90 26.7, p95 28.9 m/s²) showed ACE was planning at the
+p95 — achievable 5% of the time. Planned grip is now capped below p90, and skill instead buys
+tighter line-holding plus a wide-running recovery term. Verified monotonic on 22/22 circuits.
+
 ### AI
 
 All three rivals run the **identical physics function** as the player, just with synthetic inputs —
@@ -149,12 +166,20 @@ Roughly 45 draw calls and 590k triangles.
 `window.__rush` is exposed for tinkering from devtools:
 
 ```js
-__rush.Game.autopilot = true    // hand your car to the AI
-__rush.player.boostMeter = 1    // fill the boost bar
-__rush.Game.respawn()           // pop back onto the racing line
+__rush.Game.autopilot = true       // hand your car to the AI
+__rush.player.boostMeter = 1       // fill the boost bar
+__rush.Game.respawn()              // pop back onto the racing line
+__rush.applySeed('ZEBRA')          // rebuild the circuit in place
+__rush.Game.fastForward(105)       // simulate 105s headlessly (~120 ms)
 ```
 
 Autopilot is off by default and takes effect on the next frame — no restart needed.
+
+`fastForward` runs the simulation with no rendering, at roughly 850× real time, via the same
+`stepSim()` the render loop uses — so balance measurements exercise the real physics rather than a
+reimplementation. A 22-circuit × 3-difficulty sweep takes about seven seconds. It exists because
+measuring balance through the rendered loop took ~40 minutes per sweep and was throttled by the
+browser whenever the tab wasn't focused.
 
 ---
 
