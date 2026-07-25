@@ -1407,6 +1407,19 @@ function flushSkids() {
 }
 
 /* ------------------- 13. audio — everything synthesised ---------------- */
+/* Results loop: Am - F - C - G, four bars of 4/4. Melody sits on chord tones at
+   the bar lines and passes through the rest, and the last bar ends on B so it
+   leans back into the C that opens the loop. [midi, startBeat, beats] */
+const MUSIC = {
+  bpm: 92, beats: 16,
+  lead: [[72,0,1.5],[74,1.5,0.5],[76,2,2],   [74,4,1.5],[72,5.5,0.5],[69,6,2],
+         [67,8,1.5],[69,9.5,0.5],[72,10,2],  [74,12,1], [72,13,1],   [71,14,2]],
+  // kept at or above ~87 Hz: a sine at C2 (65 Hz) is nearly silent on laptop speakers
+  bass: [[45,0,2],[52,2,2],  [41,4,2],[48,6,2],
+         [48,8,2],[55,10,2], [43,12,2],[50,14,2]],
+  pad:  [[[57,60,64],0,3.8], [[53,57,60],4,3.8], [[48,52,55],8,3.8], [[55,59,62],12,3.8]]
+};
+
 const Sfx = {
   ok: false, ctx: null, master: null, muted: false, noise: null,
 
@@ -1519,6 +1532,74 @@ const Sfx = {
   chime()  { this.tone(880, 880, 0.26, 0.16, 'triangle'); setTimeout(() => this.tone(1320, 1320, 0.42, 0.15, 'triangle'), 110); },
   fanfare(){ [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.tone(f, f, 0.5, 0.16, 'triangle'), i * 130)); },
 
+  /* ---- results music --------------------------------------------------
+     Four bars of vi-IV-I-V in C, ~92 BPM, scheduled on the audio clock rather
+     than with timers so it stays in time and loops seamlessly. Soft triangle
+     lead over a sine bass and a very quiet sawtooth pad. */
+  noteHz(n) { return 440 * Math.pow(2, (n - 69) / 12); },
+
+  note(type, midi, when, dur, gain, cutoff) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator(); o.type = type;
+    o.frequency.value = this.noteHz(midi);
+    const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.linearRampToValueAtTime(gain, when + 0.05);
+    g.gain.setTargetAtTime(0.0001, when + dur * 0.55, dur * 0.30);
+    o.connect(f); f.connect(g); g.connect(this.musicBus);
+    o.start(when); o.stop(when + dur + 0.8);
+  },
+
+  startMusic() {
+    if (!this.ok || this.musicOn) return;
+    if (!this.musicBus) {
+      this.musicBus = this.ctx.createGain();
+      this.musicBus.gain.value = 0.0001;
+      this.musicBus.connect(this.master);
+    }
+    this.musicOn = true;
+    const t = this.ctx.currentTime;
+    this.musicBus.gain.cancelScheduledValues(t);
+    this.musicBus.gain.setValueAtTime(0.0001, t);
+    this.musicBus.gain.linearRampToValueAtTime(0.5, t + 1.4);
+    this.musicAt = t + 0.2;
+    this.musicTimer = setInterval(() => this.pump(), 120);
+    this.pump();
+  },
+
+  pump() {
+    if (!this.musicOn) return;
+    const spb = 60 / MUSIC.bpm, loop = MUSIC.beats * spb;
+    // schedule well ahead so a throttled tab cannot open a gap in the loop
+    while (this.musicAt < this.ctx.currentTime + 2.0) {
+      const t0 = this.musicAt;
+      for (const [n, b, d] of MUSIC.lead) this.note('triangle', n, t0 + b * spb, d * spb, 0.17, 2600);
+      for (const [n, b, d] of MUSIC.bass) this.note('sine',     n, t0 + b * spb, d * spb, 0.22, 600);
+      for (const [ch, b, d] of MUSIC.pad)
+        for (const n of ch) this.note('sawtooth', n, t0 + b * spb, d * spb, 0.026, 800);
+      this.musicAt += loop;
+    }
+  },
+
+  stopMusic() {
+    if (!this.musicOn) return;
+    this.musicOn = false;
+    clearInterval(this.musicTimer);
+    if (this.musicBus) this.musicBus.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.22);
+  },
+
+  /* Ease the racing loops down when the flag drops, instead of leaving four
+     engines droning behind the results card. */
+  raceOut() {
+    if (!this.ok) return;
+    const t = this.ctx.currentTime;
+    for (const l of [this.screech, this.rumble, this.wind, this.tow])
+      l.g.gain.setTargetAtTime(0, t, 0.30);
+    this.engine.out.gain.setTargetAtTime(0, t, 0.35);
+    this.rival.out.gain.setTargetAtTime(0, t, 0.35);
+  },
+
   /* The frame loop only mixes audio while the race is live, so leaving mid-race
      would otherwise strand the engine and tyre loops at their last gain. */
   silence() {
@@ -1527,6 +1608,7 @@ const Sfx = {
     for (const l of [this.screech, this.rumble, this.wind, this.tow]) l.g.gain.setValueAtTime(0, t);
     this.engine.out.gain.setValueAtTime(0, t);
     this.rival.out.gain.setValueAtTime(0, t);
+    this.stopMusic();
   },
 
   toggleMute() {
@@ -2275,6 +2357,7 @@ const Game = {
     driftScore = driftRun = bankedScore = 0; driftMult = 1;
     this.raceTime = 0; this.finishOrder = []; this.projected = null;
     resetPhys(0x9E3779B9);
+    Sfx.stopMusic();
     clearTimeout(this.resultTimer); this.resultCard = null;
     camPos.copy(player.pos).add(new THREE.Vector3(0, 6, -16));
     this.countdown = 3.0;
@@ -2334,6 +2417,8 @@ const Game = {
       const rank = cars.slice().sort(cmpRace).indexOf(player);
       Sfx.fanfare();
       this.state = 'done';
+      Sfx.raceOut();
+      setTimeout(() => { if (this.state === 'done') Sfx.startMusic(); }, 1200);
       this.projected = this.projectFinish();
       // Snapshot the numbers now: the card renders 1.4s later, and Enter restarts
       // the race during exactly that window, which would blank them out.
@@ -2607,8 +2692,8 @@ function frame() {
     if (player.boostStarted) { player.boostStarted = false; Sfx.boost(); }
     if (player.boostDenied > 0.4) Sfx.burst(0.09, 0.05, 'bandpass', 900, 380, 4);   // "no fuel" blip
 
-    // audio mix
-    if (Sfx.ok && !Sfx.muted) {
+    // audio mix — stops at the flag so raceOut()'s fade is not rewritten each frame
+    if (Sfx.ok && !Sfx.muted && Game.state !== 'done') {
       Sfx.engineUpdate(Sfx.engine, player.rpm, player.ctl.throttle, 0.34);
       let near = null, nd = 1e9;
       for (const r of rivals) { const d = r.pos.distanceTo(player.pos); if (d < nd) { nd = d; near = r; } }
