@@ -251,6 +251,10 @@ finishing spread of **0.06 seconds** across two minutes of racing.
 - **Audio** — Web Audio only. The engine is detuned sawtooth + square oscillators through a
   filter tracking simulated RPM across six gears; tyre screech, wind and off-track rumble are
   filtered noise; boost is a swept band-pass.
+- **Results music** — when you cross the line the racing loops fade out and a four-bar loop fades
+  in under the results card: Am–F–C–G at 92 BPM, soft triangle lead over a sine bass and a quiet
+  sawtooth pad. Notes are scheduled on the audio clock rather than with timers, two seconds ahead,
+  so it stays in time and does not gap if the tab is throttled.
 - **Terrain** — ridged fBm over a 280×280 grid, vertex-coloured for rock / snow / pine.
 - **Textures** — asphalt, kerbs and the chequered line are drawn to `<canvas>` at load.
 - **Effects** — pooled GPU particles for tyre smoke and snow spray; skid marks are a ring buffer
