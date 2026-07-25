@@ -28,6 +28,11 @@ Gamepad is supported: left stick steers, RT/LT are throttle and brake, A drifts,
 
 Typing in the seed field is safe — driving keys are ignored while an input has focus.
 
+**Boost engages only with real charge.** Below ~12% the meter is reserve — pressing `SHIFT` there
+refuses and says so rather than spending your last sliver on a burst too short to feel. Those
+segments are marked in magenta on the bar. Once engaged, every press delivers at least half a
+second, so a tap always does something; hold it and a full meter is worth about three seconds.
+
 **Drift is the boost economy.** Tap `SPACE` into a corner and steer through the slide — the meter
 fills fast and a sustained slide builds a score multiplier up to ×6. Cruising above ~145 km/h
 only trickles it. You start 4th of 4 on purpose.
