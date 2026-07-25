@@ -2178,6 +2178,7 @@ const Game = {
     cars.forEach((c, i) => c.placeOnGrid(i));   // slot 0 = back of the grid = player
     driftScore = driftRun = bankedScore = 0; driftMult = 1;
     this.raceTime = 0; this.finishOrder = []; this.projected = null;
+    clearTimeout(this.resultTimer); this.resultCard = null;
     camPos.copy(player.pos).add(new THREE.Vector3(0, 6, -16));
     this.countdown = 3.0;
     this.state = 'count';
@@ -2236,7 +2237,12 @@ const Game = {
       Sfx.fanfare();
       this.state = 'done';
       this.projected = this.projectFinish();
-      setTimeout(() => this.showResults(rank), 1400);
+      // Snapshot the numbers now: the card renders 1.4s later, and Enter restarts
+      // the race during exactly that window, which would blank them out.
+      this.resultCard = { rank, best: player.best, total: player.finishTime,
+                          score: bankedScore + Math.round(driftScore), seed: SEED,
+                          diff: DIFF[diff].name };
+      this.resultTimer = setTimeout(() => this.showResults(rank), 1400);
       toast('FINISH', 2000, '#ffcc33');
       el.flash.style.transition = 'none'; el.flash.style.opacity = '0.6';
       requestAnimationFrame(() => { el.flash.style.transition = 'opacity .8s'; el.flash.style.opacity = '0'; });
@@ -2244,9 +2250,12 @@ const Game = {
   },
 
   showResults(rank) {
+    const card = this.resultCard || { rank, best: player.best, total: player.finishTime,
+                                      score: bankedScore + Math.round(driftScore),
+                                      seed: SEED, diff: DIFF[diff].name };
     const order = cars.slice().sort(cmpRace);
     $('rtitle').textContent = rank === 0 ? 'VICTORY' : rank === 1 ? 'SO CLOSE' : 'FINISH';
-    $('rsub').textContent = `${ORD[rank]}${SUF[rank]} PLACE · ${DIFF[diff].name} · CIRCUIT ${SEED}`;
+    $('rsub').textContent = `${ORD[rank]}${SUF[rank]} PLACE · ${card.diff} · CIRCUIT ${card.seed}`;
     const proj = this.projected || new Map();
     const timeOf = c => c.finished ? { t: c.finishTime, projected: false }
                                    : (proj.get(c) || null);
@@ -2270,9 +2279,9 @@ const Game = {
     }).join('');
     $('rnote').textContent = anyProjected
       ? '◦ projected — simulated to the flag after you finished' : '';
-    $('rbest').textContent = fmt(player.best);
-    $('rtotal').textContent = fmt(player.finishTime);
-    $('rscore').textContent = (bankedScore + Math.round(driftScore)).toLocaleString();
+    $('rbest').textContent = fmt(card.best);
+    $('rtotal').textContent = fmt(card.total);
+    $('rscore').textContent = card.score.toLocaleString();
     $('results').classList.remove('hide');
     el.hud.classList.remove('on');
   },
