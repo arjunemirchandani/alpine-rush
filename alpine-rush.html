@@ -52,8 +52,15 @@
      So the outline is drawn as a shape, not a border: an outer layer in the line
      colour, with the fill inset by 1px on a smaller notch, leaving a 1px stroke
      that follows the diagonals too.
-     Inner notch size: for outer notch n and 1px inset, the diagonals are the lines
-     x+y=n and x+y=2+c, so a 1px perpendicular stroke needs c = n - 2 - sqrt(2). */
+     Inner notch size: clip-path KEEPS the half-plane x+y >= d, so for the stroke to
+     show, the inner shape's diagonal must sit further OUT than the outer one, which
+     means a LARGER inner notch. With outer notch n, inset i and stroke width w:
+        outer diagonal  x+y = n
+        inner diagonal  x+y = 2i + c
+        perpendicular gap = (2i + c - n) / sqrt(2) = w
+        =>  c = n - 2i + w*sqrt(2)
+     Getting this backwards makes the inner shape cover the corner exactly, and the
+     diagonal silently goes missing while the straight edges still look right. */
   .panel{
     position:relative; isolation:isolate;
     background:none; border:none;
@@ -65,7 +72,7 @@
   .panel::before{ inset:0; z-index:-2; background:rgba(53,230,255,.32); }
   .panel::after{
     inset:1px; z-index:-1;
-    clip-path:polygon(6.6px 0, 100% 0, 100% calc(100% - 6.6px), calc(100% - 6.6px) 100%, 0 100%, 0 6.6px);
+    clip-path:polygon(9.41px 0, 100% 0, 100% calc(100% - 9.41px), calc(100% - 9.41px) 100%, 0 100%, 0 9.41px);
     background:var(--panel);
     box-shadow:0 0 24px rgba(53,230,255,.10) inset;
   }
@@ -120,7 +127,7 @@
   #gear::before{ inset:0; z-index:-2; background:rgba(255,204,51,.38); }
   #gear::after{
     inset:1px; z-index:-1;
-    clip-path:polygon(3.6px 0,100% 0,100% calc(100% - 3.6px),calc(100% - 3.6px) 100%,0 100%,0 3.6px);
+    clip-path:polygon(6.41px 0,100% 0,100% calc(100% - 6.41px),calc(100% - 6.41px) 100%,0 100%,0 6.41px);
     background:rgba(24,18,4,.72);
   }
 
@@ -203,7 +210,7 @@
   .btn.ghost::before{ inset:0; z-index:-2; background:rgba(53,230,255,.5); }
   .btn.ghost::after{
     inset:1px; z-index:-1;
-    clip-path:polygon(7.6px 0, 100% 0, 100% calc(100% - 7.6px), calc(100% - 7.6px) 100%, 0 100%, 0 7.6px);
+    clip-path:polygon(10.41px 0, 100% 0, 100% calc(100% - 10.41px), calc(100% - 10.41px) 100%, 0 100%, 0 10.41px);
     background:rgba(7,13,23,.62);
     transition:background .18s ease;
   }
