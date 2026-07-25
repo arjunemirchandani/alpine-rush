@@ -24,6 +24,9 @@ Needs a network connection on first load for the Three.js module (from unpkg). E
 | `R` | Respawn on the racing line |
 | `P` or `ESC` | Pause · `M` Mute |
 
+**MAIN MENU** on the pause and results screens returns to the title without reloading, so you can
+change circuit, difficulty or hour between races.
+
 Gamepad is supported: left stick steers, RT/LT are throttle and brake, A drifts, B boosts.
 
 Typing in the seed field is safe — driving keys are ignored while an input has focus.

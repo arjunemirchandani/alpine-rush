@@ -171,6 +171,11 @@
   }
   .btn:hover{ transform:translateY(-2px); box-shadow:0 0 46px rgba(53,230,255,.7); filter:brightness(1.08); }
   .btn.alt{ background:linear-gradient(180deg,#ffb0d8,var(--mg)); box-shadow:0 0 30px rgba(255,62,165,.4); margin-left:10px; }
+  .btn.ghost{
+    background:transparent; color:var(--cy); margin-left:10px;
+    border:1px solid rgba(53,230,255,.45); box-shadow:none; font-weight:500;
+  }
+  .btn.ghost:hover{ background:rgba(53,230,255,.10); box-shadow:0 0 24px rgba(53,230,255,.22); }
   .hint{ margin-top:16px; font-size:10.5px; letter-spacing:.2em; color:rgba(223,246,255,.35); }
 
   /* difficulty picker */
@@ -354,6 +359,7 @@
     <div class="sub">ENGINE IDLING</div>
     <button class="btn" id="resume">RESUME</button>
     <button class="btn alt" id="quit">RESTART</button>
+    <button class="btn ghost" id="tomenu">MAIN MENU</button>
   </div>
 </div>
 
@@ -369,6 +375,7 @@
       <div><div class="lbl">Drift Score</div><div class="v" id="rscore">--</div></div>
     </div>
     <button class="btn" id="again">RACE AGAIN</button>
+    <button class="btn ghost" id="tomenu2">MAIN MENU</button>
   </div>
 </div>
 
@@ -1445,6 +1452,16 @@ const Sfx = {
   chime()  { this.tone(880, 880, 0.26, 0.16, 'triangle'); setTimeout(() => this.tone(1320, 1320, 0.42, 0.15, 'triangle'), 110); },
   fanfare(){ [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.tone(f, f, 0.5, 0.16, 'triangle'), i * 130)); },
 
+  /* The frame loop only mixes audio while the race is live, so leaving mid-race
+     would otherwise strand the engine and tyre loops at their last gain. */
+  silence() {
+    if (!this.ok) return;
+    const t = this.ctx.currentTime;
+    for (const l of [this.screech, this.rumble, this.wind, this.tow]) l.g.gain.setValueAtTime(0, t);
+    this.engine.out.gain.setValueAtTime(0, t);
+    this.rival.out.gain.setValueAtTime(0, t);
+  },
+
   toggleMute() {
     this.muted = !this.muted;
     if (this.ok) this.master.gain.setTargetAtTime(this.muted ? 0 : 0.85, this.ctx.currentTime, 0.05);
@@ -2325,6 +2342,35 @@ const Game = {
       this.state = this.paused; $('pause').classList.add('hide'); Sfx.resume();
     }
   },
+  /* Quit the current race and return to the title screen, so the circuit,
+     difficulty and hour can be changed without reloading the page. */
+  toMenu() {
+    clearTimeout(this.resultTimer);
+    this.resultCard = null; this.projected = null;
+    this.state = 'menu';
+
+    $('pause').classList.add('hide');
+    $('results').classList.add('hide');
+    $('title').classList.remove('hide');
+    el.hud.classList.remove('on');
+    el.count.style.opacity = '0';
+    el.pop.style.opacity = '0';
+    el.lines.style.opacity = '0';
+
+    Sfx.resume(); Sfx.silence();          // resume first: gains cannot be set on a suspended clock
+
+    driftScore = driftRun = bankedScore = 0; driftMult = 1;
+    cars.forEach((c, i) => c.placeOnGrid(i));
+    cars.forEach(c => c.updateVisual(0.016, this.now));
+    player.view.visible = true;           // first-person hides it; updateCamera has stopped
+    camPos.set(player.pos.x - 18, player.pos.y + 9, player.pos.z - 22);
+    camLook.copy(player.pos);
+    camera.position.copy(camPos); camera.lookAt(camLook);
+    fov = 72; camera.fov = fov; camera.updateProjectionMatrix();
+    drawMap();
+    showTrackInfo();
+  },
+
   cycleCam() {
     camMode = (camMode + 1) % CAMS.length;
     toast('CAM · ' + CAMS[camMode], 900, '#35e6ff');
@@ -2512,6 +2558,8 @@ $('go').addEventListener('click', () => Game.begin());
 $('again').addEventListener('click', () => Game.restart());
 $('resume').addEventListener('click', () => Game.togglePause());
 $('quit').addEventListener('click', () => { $('pause').classList.add('hide'); Game.restart(); });
+$('tomenu').addEventListener('click', () => Game.toMenu());
+$('tomenu2').addEventListener('click', () => Game.toMenu());
 
 // settle the grid and the minimap for the chosen circuit
 buildMap();
