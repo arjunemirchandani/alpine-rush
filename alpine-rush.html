@@ -197,6 +197,9 @@
   .rrow .p{ width:34px; font-weight:800; color:var(--am); }
   .rrow .nm{ flex:1; text-align:left; letter-spacing:.14em; }
   .rrow .tm{ font-variant-numeric:tabular-nums; color:rgba(223,246,255,.75); }
+  .rrow .tm.proj{ color:rgba(223,246,255,.45); font-style:italic; }
+  .rrow .tm.proj::after{ content:' \25E6'; color:var(--am); font-style:normal; }
+  #rnote{ margin-top:9px; font-size:9.5px; letter-spacing:.16em; color:rgba(223,246,255,.34); min-height:12px; }
   #rstats{ display:flex; justify-content:center; gap:38px; margin-top:20px; }
   #rstats div{ text-align:center; }
   #rstats .v{ font-size:22px; color:var(--gn); font-variant-numeric:tabular-nums; text-shadow:0 0 14px rgba(102,255,168,.4); }
@@ -335,6 +338,7 @@
     <div id="rtitle">FINISH</div>
     <div id="rsub">RACE COMPLETE</div>
     <div id="rgrid"></div>
+    <div id="rnote"></div>
     <div id="rstats">
       <div><div class="lbl">Best Lap</div><div class="v" id="rbest">--</div></div>
       <div><div class="lbl">Total</div><div class="v" id="rtotal">--</div></div>
@@ -1429,6 +1433,12 @@ class Car {
     this.pos.y = heightAt(this.pos.x, this.pos.z, this.hint);
     this.groundY = this.pos.y;
     this.laps = 0; this.progress = q.s; this.finished = false;
+    // derived fields too, or the HUD flashes the previous race's speed for a frame
+    this.speed = this.drift = this.wheelSpin = this.lean = this.offTime = this.driftHold = 0;
+    this.gear = 0; this.rpm = 0.15; this.boosting = this.drifting = false;
+    this.ctl.steer = this.ctl.throttle = this.ctl.brake = 0;
+    this.ctl.hand = this.ctl.boost = false;
+    this.lastSkid = [null, null];
     this.boostMeter = this.ai ? 0.45 : 0;
     this.lapTimes = []; this.best = Infinity; this.lapStart = 0;
     this.syncView();
@@ -1561,6 +1571,32 @@ class Car {
     this.speed = 0; this.hint = back.i; this.prevS = q.s - 8;
     if (this.prevS < 0) this.prevS += TOTAL;
     this.pos.y = this.groundY = heightAt(this.pos.x, this.pos.z, this.hint);
+  }
+
+  /* Full physics state, so the race can be simulated forward and rolled back. */
+  snapshot() {
+    return {
+      px: this.pos.x, py: this.pos.y, pz: this.pos.z,
+      vx: this.vx, vz: this.vz, yaw: this.yaw, yawRate: this.yawRate,
+      vLong: this.vLong, vLat: this.vLat, speed: this.speed, drift: this.drift,
+      hint: this.hint, prevS: this.prevS, laps: this.laps, progress: this.progress,
+      s: this.s, lat: this.lat, boostMeter: this.boostMeter, boosting: this.boosting,
+      onTrack: this.onTrack, groundY: this.groundY, wheelSpin: this.wheelSpin,
+      lean: this.lean, gear: this.gear, rpm: this.rpm, drifting: this.drifting,
+      finished: this.finished, finishTime: this.finishTime, best: this.best,
+      lapStart: this.lapStart, lapTimes: this.lapTimes.slice(),
+      offTime: this.offTime, driftHold: this.driftHold, ctl: { ...this.ctl }
+    };
+  }
+  restore(k) {
+    this.pos.set(k.px, k.py, k.pz);
+    this.lapTimes = k.lapTimes.slice();
+    Object.assign(this.ctl, k.ctl);
+    for (const f of ['vx','vz','yaw','yawRate','vLong','vLat','speed','drift','hint','prevS',
+                     'laps','progress','s','lat','boostMeter','boosting','onTrack','groundY',
+                     'wheelSpin','lean','gear','rpm','drifting','finished','finishTime','best',
+                     'lapStart','offTime','driftHold']) this[f] = k[f];
+    this.lastSkid = [null, null];
   }
 
   /* ---------- AI ---------- */
@@ -1938,7 +1974,7 @@ const Game = {
     applyDifficulty();
     cars.forEach((c, i) => c.placeOnGrid(i));   // slot 0 = back of the grid = player
     driftScore = driftRun = bankedScore = 0; driftMult = 1;
-    this.raceTime = 0; this.finishOrder = [];
+    this.raceTime = 0; this.finishOrder = []; this.projected = null;
     camPos.copy(player.pos).add(new THREE.Vector3(0, 6, -16));
     this.countdown = 3.0;
     this.state = 'count';
@@ -1966,12 +2002,37 @@ const Game = {
     }
   },
 
+  /* When you cross the line the rivals are still circulating, so their times are
+     unknown. Rather than print DNF, simulate the rest of the race headlessly and
+     report what actually happens, then roll every car back so the scene behind
+     the results card carries on undisturbed. */
+  projectFinish(cap = 150) {
+    const snaps = cars.map(c => c.snapshot());
+    const g = { state: this.state, race: this.raceTime, now: this.now,
+                auto: this.autopilot, order: this.finishOrder.slice() };
+    this.autopilot = false;
+    this.state = 'race';
+    player.ctl.throttle = 0; player.ctl.brake = 0.4;      // you coast after the flag
+    player.ctl.hand = false; player.ctl.boost = false;
+
+    const simulated = this.fastForward(cap, () => cars.every(c => c.finished) ? false : undefined);
+    const times = new Map();
+    for (const c of cars) if (c.finished) times.set(c, { t: c.finishTime, projected: !snaps[cars.indexOf(c)].finished });
+
+    cars.forEach((c, i) => c.restore(snaps[i]));
+    this.state = g.state; this.raceTime = g.race; this.now = g.now;
+    this.autopilot = g.auto; this.finishOrder = g.order;
+    this.projSeconds = simulated;
+    return times;
+  },
+
   onFinish(car) {
     this.finishOrder.push(car);
     if (car === player) {
       const rank = cars.slice().sort(cmpRace).indexOf(player);
       Sfx.fanfare();
       this.state = 'done';
+      this.projected = this.projectFinish();
       setTimeout(() => this.showResults(rank), 1400);
       toast('FINISH', 2000, '#ffcc33');
       el.flash.style.transition = 'none'; el.flash.style.opacity = '0.6';
@@ -1983,11 +2044,29 @@ const Game = {
     const order = cars.slice().sort(cmpRace);
     $('rtitle').textContent = rank === 0 ? 'VICTORY' : rank === 1 ? 'SO CLOSE' : 'FINISH';
     $('rsub').textContent = `${ORD[rank]}${SUF[rank]} PLACE · ${DIFF[diff].name} · CIRCUIT ${SEED}`;
-    $('rgrid').innerHTML = order.map((c, i) =>
-      `<div class="rrow${c.ai ? '' : ' me'}"><span class="p">${i + 1}</span>
+    const proj = this.projected || new Map();
+    const timeOf = c => c.finished ? { t: c.finishTime, projected: false }
+                                   : (proj.get(c) || null);
+    const final = cars.slice().sort((x, y) => {
+      const a2 = timeOf(x), b2 = timeOf(y);
+      if (a2 && b2) return a2.t - b2.t;
+      return a2 ? -1 : b2 ? 1 : y.progress - x.progress;         // unfinished last
+    });
+    const winner = timeOf(final[0]);
+    let anyProjected = false;
+    $('rgrid').innerHTML = final.map((c, i) => {
+      const e = timeOf(c);
+      if (e && e.projected) anyProjected = true;
+      const label = !e ? 'DNF'
+        : i === 0 ? fmt(e.t)
+        : '+' + ((e.t - winner.t) / 1000).toFixed(3);
+      return `<div class="rrow${c.ai ? '' : ' me'}"><span class="p">${i + 1}</span>
        <span class="dot" style="color:#${c.color.toString(16).padStart(6, '0')};width:8px;height:8px;border-radius:50%;background:currentColor"></span>
        <span class="nm">${c.name}</span>
-       <span class="tm">${c.finished ? fmt(c.finishTime) : 'DNF'}</span></div>`).join('');
+       <span class="tm${e && e.projected ? ' proj' : ''}">${label}</span></div>`;
+    }).join('');
+    $('rnote').textContent = anyProjected
+      ? '◦ projected — simulated to the flag after you finished' : '';
     $('rbest').textContent = fmt(player.best);
     $('rtotal').textContent = fmt(player.finishTime);
     $('rscore').textContent = (bankedScore + Math.round(driftScore)).toLocaleString();
@@ -2036,8 +2115,9 @@ const Game = {
       this.now += dt;
       if (this.autopilot) player.think(dt, cars);
       stepSim(dt);
-      if (sample) sample(i);
+      if (sample && sample(i) === false) return i * dt;    // caller asked to stop
     }
+    return seconds;
   }
 };
 

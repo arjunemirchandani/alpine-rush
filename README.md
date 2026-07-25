@@ -137,6 +137,21 @@ actually pulls (`v · yawRate`: p50 14.8, p90 26.7, p95 28.9 m/s²) showed ACE w
 p95 — achievable 5% of the time. Planned grip is now capped below p90, and skill instead buys
 tighter line-holding plus a wide-running recovery term. Verified monotonic on 22/22 circuits.
 
+### Results: projected finishes, not DNF
+
+When you cross the line the rivals are still circulating, so their times aren't known yet. Printing
+`DNF` for a car that is simply still racing is wrong, and extrapolating from average pace is only an
+estimate. Instead the game **simulates the rest of the race headlessly** via `fastForward` and
+reports what actually happens.
+
+Every car's full physics state is snapshotted first and restored afterwards — verified
+byte-identical across all four cars — so the scene behind the results card carries on undisturbed.
+It early-exits the moment the last car is home, so it typically costs 0–8 simulated seconds
+(single-digit milliseconds). Projected entries are dimmed and marked `◦` with a footnote; they're
+computed by the real physics, but you didn't watch them happen, and the UI says so.
+
+Results are shown as gaps to the winner rather than raw times.
+
 ### AI
 
 All three rivals run the **identical physics function** as the player, just with synthetic inputs —
