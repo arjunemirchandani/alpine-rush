@@ -171,6 +171,23 @@
   }
   .dbtn.sel{ color:var(--ink); background:var(--cy); border-color:var(--cy); box-shadow:0 0 20px rgba(53,230,255,.5); font-weight:700; }
 
+  /* seed picker */
+  #seedrow{ display:flex; gap:9px; justify-content:center; align-items:center; margin-top:14px; }
+  #seedrow .lbl{ letter-spacing:.24em; }
+  #seedin{
+    width:150px; padding:9px 12px; text-align:center; font-family:inherit; font-size:13px;
+    font-weight:700; letter-spacing:.26em; text-transform:uppercase;
+    color:var(--am); background:rgba(255,204,51,.07);
+    border:1px solid rgba(255,204,51,.38); outline:none;
+    text-shadow:0 0 10px rgba(255,204,51,.5);
+  }
+  #seedin:focus{ border-color:var(--am); box-shadow:0 0 18px rgba(255,204,51,.3); }
+  #trackinfo{
+    margin-top:11px; font-size:10.5px; letter-spacing:.19em; color:rgba(223,246,255,.5);
+    min-height:14px;
+  }
+  #trackinfo b{ color:var(--cy); font-weight:500; }
+
   /* results */
   #rtitle{ font-size:min(62px,9vw); font-weight:800; letter-spacing:.06em; color:#fff; text-shadow:0 0 30px rgba(255,204,51,.55); }
   #rsub{ font-size:12px; letter-spacing:.4em; color:var(--am); margin-top:6px; }
@@ -293,6 +310,12 @@
       <button class="dbtn sel" data-d="1">PRO</button>
       <button class="dbtn" data-d="2">ACE</button>
     </div>
+    <div id="seedrow">
+      <span class="lbl">Circuit</span>
+      <input id="seedin" maxlength="12" spellcheck="false" autocomplete="off" value="ALPINE" />
+      <button class="dbtn" id="reroll">SHUFFLE</button>
+    </div>
+    <div id="trackinfo"></div>
     <button class="btn" id="go">START ENGINE</button>
     <div class="hint">DRIFT TO FILL THE BOOST METER · GAMEPAD SUPPORTED</div>
   </div>
@@ -371,32 +394,92 @@ function fbm(x, y, oct = 4) {
 }
 
 /* --------------------------- 2. the circuit ----------------------------
-   The centreline is an analytic radial curve r(θ) — being single-valued in
-   θ it can never self-intersect, which makes lap logic and AI bullet-proof. */
-/* The modulation is faded out around theta = 0 so the start/finish sector
-   becomes a long constant-radius blast — somewhere to actually use top speed. */
+   The centreline is an analytic radial curve r(theta) — being single-valued
+   in theta it can never self-intersect, which makes lap logic and AI
+   bullet-proof. Everything else in the world derives from this one function.
+
+   The shape is drawn from a seeded PRNG, so any seed string produces a
+   different circuit. Validity is guaranteed two ways: self-intersection is
+   impossible *by construction*, and the drivable properties (corner radius,
+   gradient, lap length) are *measured* after generation — a candidate that
+   fails is rejected and the next one is drawn. Same seed, same track. */
+
+/* --- seeded PRNG (mulberry32) + string hashing --- */
+function strSeed(str) {
+  let h = 0x811c9dc5;
+  const t = String(str).toUpperCase();
+  for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
+function mulberry32(a) {
+  return function () {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* --- the shape parameters --- */
+// The hand-tuned original, kept as the default circuit.
+const CLASSIC = {
+  base: 300, sw: [0.55, 1.30],
+  rad: [[3, 62, 0.6], [5, 28, 2.1], [2, 34, -0.9]],           // [mode, amplitude, phase]
+  elev: [[2, 14, 0.4], [3, 8, -1.2], [5, 3.5, 0.3]],
+  noise: [0, 0]                                                // mountain-range offset
+};
+let TRACK = CLASSIC, SEED = 'ALPINE';
+
+function drawParams(rnd) {
+  const pick = arr => arr[(rnd() * arr.length) | 0];
+  const rng = (a, b) => a + rnd() * (b - a);
+  const inner = rng(0.42, 0.66);
+  return {
+    base: rng(268, 332),
+    sw: [inner, inner + rng(0.60, 0.88)],                      // main-straight window
+    rad: [
+      [pick([2, 3]),       rng(44, 74), rnd() * 6.283],
+      [pick([4, 5, 6]),    rng(16, 36), rnd() * 6.283],
+      [pick([2, 3, 5, 7]), rng(18, 44), rnd() * 6.283]
+    ],
+    elev: [
+      [pick([2, 3]),    rng(9, 19),  rnd() * 6.283],
+      [pick([3, 4]),    rng(5, 12),  rnd() * 6.283],
+      [pick([5, 6, 7]), rng(2, 6.5), rnd() * 6.283]
+    ],
+    noise: [rng(-4000, 4000), rng(-4000, 4000)]
+  };
+}
+
+/* The modulation fades out around theta = 0, so the start/finish sector is a
+   long constant-radius blast — somewhere to actually use top speed. */
 function straightness(t) {
-  return smooth(0.55, 1.30, Math.abs(wrapPi(t)));      // 0 on the main straight, 1 in the twisty bits
+  return smooth(TRACK.sw[0], TRACK.sw[1], Math.abs(wrapPi(t)));
 }
 function trackRadius(t) {
   const w = straightness(t);
-  return 300 + w * (62 * Math.sin(3 * t + 0.6) + 28 * Math.sin(5 * t + 2.1) + 34 * Math.sin(2 * t - 0.9));
+  let m = 0;
+  for (const [n, a, ph] of TRACK.rad) m += a * Math.sin(n * t + ph);
+  return TRACK.base + w * m;
 }
 function trackElev(t) {
   const w = 0.32 + 0.68 * straightness(t);
-  return w * (14 * Math.sin(2 * t + 0.4) + 8 * Math.sin(3 * t - 1.2) + 3.5 * Math.sin(5 * t + 0.3));
+  let m = 0;
+  for (const [n, a, ph] of TRACK.elev) m += a * Math.sin(n * t + ph);
+  return w * m;
 }
 
-// flat arrays: fast, zero GC
+// flat arrays: fast, zero GC. Refilled in place on every re-seed.
 const PX = new Float32Array(N), PY = new Float32Array(N), PZ = new Float32Array(N);
 const TX = new Float32Array(N), TZ = new Float32Array(N);          // tangent (xz, normalised)
-const RX = new Float32Array(N), RZ = new Float32Array(N);          // right  (xz, normalised)
+const RX = new Float32Array(N), RZ = new Float32Array(N);          // lateral (xz, normalised)
 const SEG = new Float32Array(N), CUM = new Float32Array(N + 1);    // segment + cumulative length
 const KAP = new Float32Array(N);                                   // signed curvature (+ = right turn)
 const OFF = new Float32Array(N);                                   // racing-line lateral offset
 let TOTAL = 0;
 
-(function buildCentreline() {
+function buildCentreline() {
+  TOTAL = 0;
   for (let i = 0; i < N; i++) {
     const th = i / N * Math.PI * 2, r = trackRadius(th);
     PX[i] = Math.cos(th) * r; PZ[i] = Math.sin(th) * r; PY[i] = trackElev(th);
@@ -424,7 +507,8 @@ let TOTAL = 0;
     KAP[i] = Math.atan2(cross, dot) / Math.max(SEG[i], 0.001);
   }
   blur(KAP, 6, 2);
-})();
+  buildRacingLine();
+}
 
 function blur(arr, radius, passes) {
   const n = arr.length, tmp = new Float32Array(n);
@@ -439,8 +523,8 @@ function blur(arr, radius, passes) {
   return arr;
 }
 
-/* racing line: band-pass of curvature ⇒ hug the apex, run wide on entry/exit */
-(function buildRacingLine() {
+/* racing line: band-pass of curvature => hug the apex, run wide on entry/exit */
+function buildRacingLine() {
   const raw = new Float32Array(N), wide = new Float32Array(N);
   const kref = 0.011;
   for (let i = 0; i < N; i++) raw[i] = clamp(KAP[i] / kref, -1, 1);
@@ -449,7 +533,63 @@ function blur(arr, radius, passes) {
   const maxOff = HALF_W - 3.4;
   for (let i = 0; i < N; i++) OFF[i] = clamp(tight[i] * 1.65 - wide[i] * 0.85, -1, 1) * maxOff;
   blur(OFF, 8, 2);
-})();
+}
+
+/* --- measure what construction cannot guarantee --- */
+const LIMITS = { minRadius: 46, minR: 165, maxGrade: 0.27, len: [1650, 3000] };
+
+function measureTrack() {
+  let maxK = 0, minR = Infinity, maxGrade = 0, corners = 0;
+  let wasCorner = false;
+  for (let i = 0; i < N; i++) {
+    const k = Math.abs(KAP[i]);
+    if (k > maxK) maxK = k;
+    const r = Math.hypot(PX[i], PZ[i]);
+    if (r < minR) minR = r;
+    const j = (i + 1) % N;
+    const g = Math.abs(PY[j] - PY[i]) / Math.max(SEG[i], 0.01);
+    if (g > maxGrade) maxGrade = g;
+    const isCorner = k > 0.006;                       // count distinct turns for the UI
+    if (isCorner && !wasCorner) corners++;
+    wasCorner = isCorner;
+  }
+  return {
+    minCornerRadius: maxK > 1e-6 ? 1 / maxK : Infinity,
+    minR, maxGrade, corners, length: TOTAL,
+    straightPct: 100 * countStraight() / N
+  };
+}
+function countStraight() {
+  let n = 0;
+  for (let i = 0; i < N; i++) if (Math.abs(KAP[i]) < 0.0035) n++;
+  return n;
+}
+function isDrivable(m) {
+  return m.minCornerRadius >= LIMITS.minRadius
+      && m.minR            >= LIMITS.minR
+      && m.maxGrade        <= LIMITS.maxGrade
+      && m.length          >= LIMITS.len[0] && m.length <= LIMITS.len[1]
+      && m.corners         >= 6;
+}
+
+/* Draw candidates until one measures as drivable. Deterministic per seed:
+   the same seed always walks the same sequence and accepts the same track. */
+function generateTrack(seedStr) {
+  SEED = String(seedStr || 'ALPINE').toUpperCase().slice(0, 12).replace(/[^A-Z0-9]/g, '') || 'ALPINE';
+  if (SEED === 'ALPINE') {                            // the curated default
+    TRACK = CLASSIC; buildCentreline();
+    return { ...measureTrack(), seed: SEED, attempts: 0 };
+  }
+  const rnd = mulberry32(strSeed(SEED));
+  for (let attempt = 1; attempt <= 60; attempt++) {
+    TRACK = drawParams(rnd);
+    buildCentreline();
+    const m = measureTrack();
+    if (isDrivable(m)) return { ...m, seed: SEED, attempts: attempt };
+  }
+  TRACK = CLASSIC; buildCentreline();                 // known-good fallback
+  return { ...measureTrack(), seed: SEED, attempts: -1 };
+}
 
 /* --------------------- 3. nearest-point queries ------------------------ */
 const Q = { i: 0, t: 0, s: 0, lat: 0, y: 0, d2: 0 };
@@ -523,9 +663,10 @@ function bankProfile(t) {                 // snow berm rising just off the tarma
   return 3.2 * smooth(0, 9, t);
 }
 function mountainH(x, z, baseY) {
-  const ridge = 1 - Math.abs(fbm(x * 0.0016 + 3.7, z * 0.0016 - 2.1, 3));   // 0..1 sharp crests
-  const roll  = 0.5 + 0.5 * fbm(x * 0.0009 - 5.2, z * 0.0009 + 8.4, 3);     // 0..1 broad massifs
-  const det   = fbm(x * 0.0105, z * 0.0105, 3);
+  const x0 = x + TRACK.noise[0], z0 = z + TRACK.noise[1];   // each seed gets its own range
+  const ridge = 1 - Math.abs(fbm(x0 * 0.0016 + 3.7, z0 * 0.0016 - 2.1, 3));  // 0..1 sharp crests
+  const roll  = 0.5 + 0.5 * fbm(x0 * 0.0009 - 5.2, z0 * 0.0009 + 8.4, 3);    // 0..1 broad massifs
+  const det   = fbm(x0 * 0.0105, z0 * 0.0105, 3);
   // strictly additive: the valley floor can never sink below the road
   return baseY + 8 + 340 * ridge * (0.28 + 0.72 * roll) + 30 * det * ridge + 28 * roll;
 }
@@ -537,7 +678,8 @@ function heightAt(x, z, hint, sub) {
   const berm = q.y + bankProfile(t);
   if (t < 24) return berm;
   // valley width wanders between tight gorges and open bowls
-  const open = 55 + 135 * (0.5 + 0.5 * fbm(x * 0.0021 + 2.3, z * 0.0021 - 4.7, 2));
+  const open = 55 + 135 * (0.5 + 0.5 * fbm((x + TRACK.noise[0]) * 0.0021 + 2.3,
+                                            (z + TRACK.noise[1]) * 0.0021 - 4.7, 2));
   return lerp(berm, mountainH(x, z, q.y), smooth(22, 22 + open, t));
 }
 
@@ -622,10 +764,40 @@ const checkTex = canvasTex(128, 128, (g, w, h) => {
     g.fillRect(x * s, y * s, s, s);
   }
 });
+const bannerTex = canvasTex(1024, 128, (g, W, H) => {
+  g.fillStyle = '#0b1220'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#35e6ff'; g.font = 'bold 76px ui-monospace, monospace';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.fillText('A L P I N E   R U S H', W / 2, H / 2 + 4);
+});
+// Textures owned by the module, never by a rebuildable mesh — clearWorld must not free these.
+const SHARED_TEX = new Set([asphaltTex, kerbTex, checkTex, bannerTex]);
 
-/* ---------------------------- 7. terrain ------------------------------- */
+/* ------------------- 7. the rebuildable world -------------------------
+   Every mesh derived from the track lives under `world`. Re-seeding disposes
+   the group and rebuilds it; the sky, lights, textures, cars and HUD are
+   track-independent and survive untouched. */
+const world = new THREE.Group();
+scene.add(world);
+
+function clearWorld() {
+  world.traverse(o => {
+    if (o.geometry) o.geometry.dispose();
+    if (!o.material) return;
+    for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+      // material.dispose() does NOT free its textures — that leaks one per rebuild
+      for (const slot of ['map', 'normalMap', 'emissiveMap', 'alphaMap', 'roughnessMap']) {
+        const t = m[slot];
+        if (t && !SHARED_TEX.has(t)) t.dispose();
+      }
+      m.dispose();
+    }
+  });
+  world.clear();
+}
+
 const SIZE = 2900, SEGS = 280;
-(function terrain() {
+function buildTerrain() {
   const n = SEGS + 1, pos = new Float32Array(n * n * 3), col = new Float32Array(n * n * 3);
   const idx = new Uint32Array(SEGS * SEGS * 6);
   const rock = new THREE.Color(0x5c5f69), snow = new THREE.Color(0xf6faff);
@@ -667,8 +839,8 @@ const SIZE = 2900, SEGS = 280;
 
   const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
   mesh.receiveShadow = true;
-  scene.add(mesh);
-})();
+  world.add(mesh);
+}
 
 /* ------------------------- 8. road + trimmings ------------------------- */
 function ribbon(inner, outer, yOff, closed = true) {
@@ -698,33 +870,35 @@ function ribbon(inner, outer, yOff, closed = true) {
   return g;
 }
 
-// tarmac
-const road = new THREE.Mesh(
-  ribbon(() => -HALF_W, () => HALF_W, () => 0.02),
-  new THREE.MeshLambertMaterial({ map: asphaltTex })
-);
-road.receiveShadow = true;
-scene.add(road);
+function buildRoad() {
+  // tarmac
+  const road = new THREE.Mesh(
+    ribbon(() => -HALF_W, () => HALF_W, () => 0.02),
+    new THREE.MeshLambertMaterial({ map: asphaltTex })
+  );
+  road.receiveShadow = true;
+  world.add(road);
 
-// white edge lines
-const lineMat = new THREE.MeshBasicMaterial({ color: 0xf3f7ff });
-scene.add(new THREE.Mesh(ribbon(() => HALF_W - 0.75, () => HALF_W - 0.15, () => 0.05), lineMat));
-scene.add(new THREE.Mesh(ribbon(() => -HALF_W + 0.15, () => -HALF_W + 0.75, () => 0.05), lineMat));
+  // white edge lines
+  const lineMat = new THREE.MeshBasicMaterial({ color: 0xf3f7ff });
+  world.add(new THREE.Mesh(ribbon(() => HALF_W - 0.75, () => HALF_W - 0.15, () => 0.05), lineMat));
+  world.add(new THREE.Mesh(ribbon(() => -HALF_W + 0.15, () => -HALF_W + 0.75, () => 0.05), lineMat));
 
-// snow banks (three-row ribbon that melts into the terrain mesh)
-const snowMat = new THREE.MeshLambertMaterial({ color: 0xeef5ff });
-for (const side of [1, -1]) {
-  scene.add(new THREE.Mesh(
-    ribbon(() => side * HALF_W, () => side * (HALF_W + 9), (i, l) => bankProfile(Math.abs(l) - HALF_W) + 0.04),
-    snowMat));
-  scene.add(new THREE.Mesh(
-    ribbon(() => side * (HALF_W + 9), () => side * (HALF_W + 25),
-      (i, l) => heightAt(PX[i] + RX[i] * l, PZ[i] + RZ[i] * l, i) - PY[i] + 0.22),
-    snowMat));
+  // snow banks (three-row ribbon that melts into the terrain mesh)
+  const snowMat = new THREE.MeshLambertMaterial({ color: 0xeef5ff });
+  for (const side of [1, -1]) {
+    world.add(new THREE.Mesh(
+      ribbon(() => side * HALF_W, () => side * (HALF_W + 9), (i, l) => bankProfile(Math.abs(l) - HALF_W) + 0.04),
+      snowMat));
+    world.add(new THREE.Mesh(
+      ribbon(() => side * (HALF_W + 9), () => side * (HALF_W + 25),
+        (i, l) => heightAt(PX[i] + RX[i] * l, PZ[i] + RZ[i] * l, i) - PY[i] + 0.22),
+      snowMat));
+  }
 }
 
 // kerbs — only where it actually bends
-(function kerbs() {
+function buildKerbs() {
   const parts = [];
   for (const side of [1, -1]) {
     const pos = [], uv = [], idx = [];
@@ -747,46 +921,39 @@ for (const side of [1, -1]) {
     parts.push(g);
   }
   const mat = new THREE.MeshLambertMaterial({ map: kerbTex });
-  for (const g of parts) scene.add(new THREE.Mesh(g, mat));
-})();
+  for (const g of parts) world.add(new THREE.Mesh(g, mat));
+}
 
 // start / finish line + gantry
-(function startLine() {
+function buildStartLine() {
   const w = HALF_W, i0 = 0, len = 5;
   const g = new THREE.PlaneGeometry(w * 2, len);
   const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: checkTex }));
   m.position.set(PX[0], PY[0] + 0.07, PZ[0]);
   m.rotation.set(-Math.PI / 2, 0, -Math.atan2(TZ[0], TX[0]));
-  scene.add(m);
+  world.add(m);
 
   const pillar = new THREE.BoxGeometry(1.5, 11, 1.5);
   const pm = new THREE.MeshStandardMaterial({ color: 0x1a2230, roughness: 0.7, metalness: 0.3 });
   for (const s of [1, -1]) {
     const p = new THREE.Mesh(pillar, pm);
     p.position.set(PX[i0] + RX[i0] * s * (w + 2.6), PY[i0] + 5.5, PZ[i0] + RZ[i0] * s * (w + 2.6));
-    p.castShadow = true; scene.add(p);
+    p.castShadow = true; world.add(p);
   }
   const beam = new THREE.Mesh(new THREE.BoxGeometry(w * 2 + 7, 2.4, 1.2), pm);
   beam.position.set(PX[i0], PY[i0] + 11.6, PZ[i0]);
   beam.rotation.y = -Math.atan2(TZ[0], TX[0]) + Math.PI / 2;
-  scene.add(beam);
+  world.add(beam);
   const banner = new THREE.Mesh(
     new THREE.PlaneGeometry(w * 2 + 6, 2.0),
-    new THREE.MeshBasicMaterial({
-      map: canvasTex(1024, 128, (g2, W, H) => {
-        g2.fillStyle = '#0b1220'; g2.fillRect(0, 0, W, H);
-        g2.fillStyle = '#35e6ff'; g2.font = 'bold 76px ui-monospace, monospace';
-        g2.textAlign = 'center'; g2.textBaseline = 'middle';
-        g2.fillText('A L P I N E   R U S H', W / 2, H / 2 + 4);
-      }), side: THREE.DoubleSide
-    }));
+    new THREE.MeshBasicMaterial({ map: bannerTex, side: THREE.DoubleSide }));
   banner.position.copy(beam.position).setY(PY[i0] + 11.6);
   banner.rotation.y = beam.rotation.y - Math.PI / 2;
-  scene.add(banner);
-})();
+  world.add(banner);
+}
 
 /* ---------------------------- 9. scenery ------------------------------- */
-(function scenery() {
+function buildScenery() {
   const M = new THREE.Matrix4(), P = new THREE.Vector3(), Qt = new THREE.Quaternion(), S = new THREE.Vector3();
   const trunks = [], foliage = [], caps = [], rocks = [], poles = [];
 
@@ -802,7 +969,7 @@ for (const side of [1, -1]) {
       const y = heightAt(x, z);
       // local slope — pines need something they can actually cling to
       const slope = Math.hypot(heightAt(x + 9, z) - y, heightAt(x, z + 9) - y) / 9;
-      const dens = fbm(x * 0.0031 + 1.7, z * 0.0031 - 2.9, 3);
+      const dens = fbm((x + TRACK.noise[0]) * 0.0031 + 1.7, (z + TRACK.noise[1]) * 0.0031 - 2.9, 3);
       const treeChance = clamp(0.74 + dens * 0.9 - smooth(120, 250, y) - smooth(0.6, 1.5, slope), 0, 1);
       if (r2 < treeChance) {
         const h = 8 + r * 13, w = 2.0 + r * 1.9;
@@ -828,7 +995,7 @@ for (const side of [1, -1]) {
     m.instanceMatrix.needsUpdate = true;
     m.castShadow = true; m.receiveShadow = false;
     m.frustumCulled = true;
-    scene.add(m);
+    world.add(m);
     return m;
   }
   Qt.identity();
@@ -843,7 +1010,23 @@ for (const side of [1, -1]) {
   Qt.identity();
   inst(new THREE.CylinderGeometry(0.13, 0.13, 1, 5), new THREE.MeshLambertMaterial({ color: 0xff6a1f }),
     poles, d => { P.set(d[0], d[1] + 1.5, d[2]); S.set(1, 3, 1); });
-})();
+}
+
+/* One call rebuilds the entire circuit from a seed string. */
+let trackInfo = null;
+function loadTrack(seedStr) {
+  trackInfo = generateTrack(seedStr);
+  clearWorld();
+  buildTerrain();
+  buildRoad();
+  buildKerbs();
+  buildStartLine();
+  buildScenery();
+  return trackInfo;
+}
+
+// first build — ?seed=XYZ in the URL picks the circuit
+loadTrack(new URLSearchParams(location.search).get('seed') || 'ALPINE');
 
 /* ---------------------------- 10. cars --------------------------------- */
 function buildCar(color, accent) {
@@ -1156,6 +1339,7 @@ const KEYMAP = {
   Space: 'hand', ShiftLeft: 'boost', ShiftRight: 'boost'
 };
 addEventListener('keydown', e => {
+  if (e.target && e.target.tagName === 'INPUT') return;      // typing a seed, not driving
   const k = KEYMAP[e.code];
   if (k) { keys[k] = true; e.preventDefault(); }
   if (e.code === 'KeyP' || e.code === 'Escape') Game.togglePause();
@@ -1646,8 +1830,9 @@ function toast(text, ms = 1600, color = '#ffcc33') {
 
 /* minimap */
 const mapCtx = el.map.getContext('2d');
-const MAPPTS = [];
-(function buildMap() {
+let MAPPTS = [];
+function buildMap() {
+  MAPPTS = [];
   let minX = 1e9, maxX = -1e9, minZ = 1e9, maxZ = -1e9;
   for (let i = 0; i < N; i++) {
     minX = Math.min(minX, PX[i]); maxX = Math.max(maxX, PX[i]);
@@ -1657,7 +1842,7 @@ const MAPPTS = [];
   const sc = (size - pad * 2) / Math.max(maxX - minX, maxZ - minZ);
   MAPPTS.to = (x, z) => [pad + (x - minX) * sc, pad + (z - minZ) * sc];
   for (let i = 0; i <= N; i += 8) MAPPTS.push(MAPPTS.to(PX[i % N], PZ[i % N]));
-})();
+}
 function drawMap() {
   const g = mapCtx; g.clearRect(0, 0, 320, 320);
   g.lineJoin = g.lineCap = 'round';
@@ -1787,7 +1972,7 @@ const Game = {
   showResults(rank) {
     const order = cars.slice().sort(cmpRace);
     $('rtitle').textContent = rank === 0 ? 'VICTORY' : rank === 1 ? 'SO CLOSE' : 'FINISH';
-    $('rsub').textContent = `${ORD[rank]}${SUF[rank]} PLACE · ${DIFF[diff].name}`;
+    $('rsub').textContent = `${ORD[rank]}${SUF[rank]} PLACE · ${DIFF[diff].name} · CIRCUIT ${SEED}`;
     $('rgrid').innerHTML = order.map((c, i) =>
       `<div class="rrow${c.ai ? '' : ' me'}"><span class="p">${i + 1}</span>
        <span class="dot" style="color:#${c.color.toString(16).padStart(6, '0')};width:8px;height:8px;border-radius:50%;background:currentColor"></span>
@@ -1943,22 +2128,62 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---------------------------- 21. wiring ------------------------------- */
-document.querySelectorAll('.dbtn').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('.dbtn').forEach(x => x.classList.remove('sel'));
+document.querySelectorAll('#diff .dbtn').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#diff .dbtn').forEach(x => x.classList.remove('sel'));
   b.classList.add('sel'); diff = +b.dataset.d;
 }));
+
+/* ---- circuit seeding ---- */
+const seedIn = $('seedin'), trackInfoEl = $('trackinfo');
+
+function showTrackInfo() {
+  const t = trackInfo;
+  const shape = t.minCornerRadius < 60 ? 'TECHNICAL' : t.minCornerRadius < 95 ? 'BALANCED' : 'FAST';
+  trackInfoEl.innerHTML =
+    `<b>${(t.length / 1000).toFixed(2)} KM</b> · <b>${t.corners}</b> CORNERS · ` +
+    `TIGHTEST <b>${Math.round(t.minCornerRadius)}M</b> · <b>${Math.round(t.straightPct)}%</b> FLAT OUT · ${shape}` +
+    (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '');
+  seedIn.value = t.seed;
+  const u = new URL(location.href);
+  if (t.seed === 'ALPINE') u.searchParams.delete('seed'); else u.searchParams.set('seed', t.seed);
+  history.replaceState(null, '', u);
+}
+
+function applySeed(str) {
+  loadTrack(str);
+  buildMap();
+  cars.forEach((c, i) => c.placeOnGrid(i));
+  cars.forEach(c => c.updateVisual(0.016, 0));
+  camPos.set(player.pos.x - 18, player.pos.y + 9, player.pos.z - 22);
+  camLook.copy(player.pos);
+  camera.position.copy(camPos); camera.lookAt(camLook);
+  drawMap();
+  showTrackInfo();
+}
+
+seedIn.addEventListener('change', () => applySeed(seedIn.value));
+seedIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.stopPropagation(); seedIn.blur(); } });
+$('reroll').addEventListener('click', () => {
+  let s = '';
+  for (let i = 0; i < 5; i++) s += 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[(Math.random() * 32) | 0];
+  applySeed(s);
+});
 $('go').addEventListener('click', () => Game.begin());
 $('again').addEventListener('click', () => Game.restart());
 $('resume').addEventListener('click', () => Game.togglePause());
 $('quit').addEventListener('click', () => { $('pause').classList.add('hide'); Game.restart(); });
 
-// idle fly-around behind the grid until the race starts
+// settle the grid and the minimap for the chosen circuit
+buildMap();
 cars.forEach((c, i) => c.placeOnGrid(i));
 cars.forEach(c => c.updateVisual(0.016, 0));
 camPos.set(player.pos.x - 18, player.pos.y + 9, player.pos.z - 22);
 camLook.copy(player.pos);
 camera.position.copy(camPos); camera.lookAt(camLook);
+drawMap();
 renderer.render(scene, camera);
+
+showTrackInfo();
 
 requestAnimationFrame(() => {
   $('load').style.display = 'none';
@@ -1969,7 +2194,9 @@ requestAnimationFrame(() => {
 //   __rush.Game.autopilot = true   -> let the AI drive your car
 //   __rush.player.boostMeter = 1   -> fill the boost bar
 //   __rush.Game.respawn()          -> pop back onto the racing line
-window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, TOTAL, Sfx, renderer };
+window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
+                  applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS,
+                  get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
 </script>
 </body>
 </html>

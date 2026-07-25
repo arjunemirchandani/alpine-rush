@@ -26,9 +26,51 @@ Needs a network connection on first load for the Three.js module (from unpkg). E
 
 Gamepad is supported: left stick steers, RT/LT are throttle and brake, A drifts, B boosts.
 
+Typing in the seed field is safe — driving keys are ignored while an input has focus.
+
 **Drift is the boost economy.** Tap `SPACE` into a corner and steer through the slide — the meter
 fills fast and a sustained slide builds a score multiplier up to ×6. Cruising above ~145 km/h
 only trickles it. You start 4th of 4 on purpose.
+
+---
+
+## Circuits
+
+The default circuit is `ALPINE` — the hand-tuned original. Any other seed string generates a
+brand-new one: layout, elevation, mountain range, forest, kerbs and the AI's racing line all
+regenerate together.
+
+- Type a seed into the **CIRCUIT** field, or hit **SHUFFLE** for a random one.
+- The URL tracks it, so `?seed=JAKDA` is a shareable link to an exact circuit.
+- The same seed always produces the same track, on any machine.
+
+The title card reports what you're about to drive:
+
+```
+2.29 KM · 11 CORNERS · TIGHTEST 48M · 42% FLAT OUT · TECHNICAL · 3 DRAWS
+```
+
+### Why every seed is drivable
+
+Two different guarantees, applied at two different levels:
+
+**Structural.** The centreline is a radial function `r(θ)`, so self-intersection is *impossible* —
+no seed can ever produce a track that crosses itself. That isn't checked, it simply cannot happen.
+
+**Measured.** Everything else — minimum corner radius, gradient, lap length, corner count — is not
+guaranteed by the representation, so it is measured after generation and enforced:
+
+```js
+const LIMITS = { minRadius: 46, minR: 165, maxGrade: 0.27, len: [1650, 3000] };
+```
+
+A candidate that fails any limit is discarded and the next is drawn from the same seeded stream.
+Because the stream is deterministic, the same seed always walks the same sequence and accepts the
+same track. Over 66 test seeds: **zero fallbacks**, 4.7 draws on average, 15 at worst against a cap
+of 60. Generated circuits ranged 1.81–2.31 km with 6–11 corners and tightest radii of 46–104 m.
+
+The AI drives them unassisted — on the most technical generated seed (11 corners, 52 m tightest,
+only 26% flat out) all four cars lapped in 38.6–40.4s.
 
 ---
 
@@ -53,6 +95,17 @@ anything else.
 
 The `w(θ)` term fades the modulation out around θ=0, carving a constant-radius main straight
 under the start gantry — somewhere to actually reach top speed.
+
+The harmonics, amplitudes, phases and straight-width are drawn from a seeded PRNG, which is what
+makes circuit generation nearly free: the representation was already a small bag of numbers.
+
+### Rebuilding the world
+
+Every track-derived mesh lives under a single `world` group. Re-seeding disposes it — geometries,
+materials **and any texture the material owns**, since `material.dispose()` does not free textures
+and that leaks one per rebuild — then rebuilds terrain, road, kerbs, banks, gantry and scenery.
+Sky, lights, shared textures, cars and HUD are track-independent and survive untouched.
+Verified at 12 consecutive rebuilds with zero growth in geometry or texture count.
 
 ### Drift physics
 
