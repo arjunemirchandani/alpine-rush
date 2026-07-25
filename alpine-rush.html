@@ -45,12 +45,29 @@
   /* ---------- HUD ---------- */
   #hud{ position:fixed; inset:0; z-index:30; pointer-events:none; opacity:0; transition:opacity .35s ease; }
   #hud.on{ opacity:1; }
+  /* NOTCHED OUTLINES
+     clip-path cuts the notch out of the element *including* its border, so on a
+     filled shape the fill follows the cut and reads correctly, but on an outlined
+     one the border is sliced clean off at the diagonal and the corner looks open.
+     So the outline is drawn as a shape, not a border: an outer layer in the line
+     colour, with the fill inset by 1px on a smaller notch, leaving a 1px stroke
+     that follows the diagonals too.
+     Inner notch size: for outer notch n and 1px inset, the diagonals are the lines
+     x+y=n and x+y=2+c, so a 1px perpendicular stroke needs c = n - 2 - sqrt(2). */
   .panel{
-    background:var(--panel);
-    border:1px solid rgba(53,230,255,.30);
-    box-shadow:0 0 24px rgba(53,230,255,.10) inset, 0 6px 26px rgba(0,0,0,.5);
+    position:relative; isolation:isolate;
+    background:none; border:none;
+    box-shadow:0 6px 26px rgba(0,0,0,.5);
     clip-path:polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
     backdrop-filter:blur(3px);
+  }
+  .panel::before, .panel::after{ content:''; position:absolute; pointer-events:none; }
+  .panel::before{ inset:0; z-index:-2; background:rgba(53,230,255,.32); }
+  .panel::after{
+    inset:1px; z-index:-1;
+    clip-path:polygon(6.6px 0, 100% 0, 100% calc(100% - 6.6px), calc(100% - 6.6px) 100%, 0 100%, 0 6.6px);
+    background:var(--panel);
+    box-shadow:0 0 24px rgba(53,230,255,.10) inset;
   }
   .lbl{ font-size:10px; letter-spacing:.22em; color:rgba(53,230,255,.65); text-transform:uppercase; }
   .val{ font-variant-numeric:tabular-nums; letter-spacing:.02em; }
@@ -94,11 +111,17 @@
   }
   #spdunit{ position:absolute; left:0; right:0; bottom:-9px; text-align:center; font-size:9.5px; letter-spacing:.34em; color:rgba(53,230,255,.6); }
   #gear{
-    position:absolute; right:2px; top:6px; width:38px; height:38px;
+    position:absolute; right:2px; top:6px; width:38px; height:38px; isolation:isolate;
     display:grid; place-items:center; font-size:20px; font-weight:800; color:var(--am);
-    border:1px solid rgba(255,204,51,.35); text-shadow:0 0 12px rgba(255,204,51,.6);
+    border:none; background:none; text-shadow:0 0 12px rgba(255,204,51,.6);
     clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px);
-    background:rgba(255,204,51,.06);
+  }
+  #gear::before, #gear::after{ content:''; position:absolute; pointer-events:none; }
+  #gear::before{ inset:0; z-index:-2; background:rgba(255,204,51,.38); }
+  #gear::after{
+    inset:1px; z-index:-1;
+    clip-path:polygon(3.6px 0,100% 0,100% calc(100% - 3.6px),calc(100% - 3.6px) 100%,0 100%,0 3.6px);
+    background:rgba(24,18,4,.72);
   }
 
   /* bottom-left: boost + drift */
@@ -172,10 +195,20 @@
   .btn:hover{ transform:translateY(-2px); box-shadow:0 0 46px rgba(53,230,255,.7); filter:brightness(1.08); }
   .btn.alt{ background:linear-gradient(180deg,#ffb0d8,var(--mg)); box-shadow:0 0 30px rgba(255,62,165,.4); margin-left:10px; }
   .btn.ghost{
-    background:transparent; color:var(--cy); margin-left:10px;
-    border:1px solid rgba(53,230,255,.45); box-shadow:none; font-weight:500;
+    position:relative; isolation:isolate;
+    background:none; border:none; box-shadow:none;
+    color:var(--cy); margin-left:10px; font-weight:500;
   }
-  .btn.ghost:hover{ background:rgba(53,230,255,.10); box-shadow:0 0 24px rgba(53,230,255,.22); }
+  .btn.ghost::before, .btn.ghost::after{ content:''; position:absolute; pointer-events:none; }
+  .btn.ghost::before{ inset:0; z-index:-2; background:rgba(53,230,255,.5); }
+  .btn.ghost::after{
+    inset:1px; z-index:-1;
+    clip-path:polygon(7.6px 0, 100% 0, 100% calc(100% - 7.6px), calc(100% - 7.6px) 100%, 0 100%, 0 7.6px);
+    background:rgba(7,13,23,.62);
+    transition:background .18s ease;
+  }
+  .btn.ghost:hover{ box-shadow:0 0 24px rgba(53,230,255,.22); }
+  .btn.ghost:hover::after{ background:rgba(53,230,255,.14); }
   .hint{ margin-top:16px; font-size:10.5px; letter-spacing:.2em; color:rgba(223,246,255,.35); }
 
   /* difficulty picker */
