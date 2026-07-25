@@ -1991,8 +1991,15 @@ function updateCamera(dt) {
   const spd = p.speed / TOP_SPEED;
   let want = _v.set(0, 0, 0), lookAhead = 9;
 
-  if (camMode === 1) {                                   // bonnet
-    want.set(p.pos.x + sy * 0.4 - cy * 0.0, p.groundY + 1.32, p.pos.z + cy * 0.4);
+  const firstPerson = camMode === 1;
+  // The bonnet camera sits inside our own cabin, so the near plane clips through
+  // the bodywork — and every pitch and roll over the terrain sweeps that clip
+  // boundary, which reads as shimmering once you are moving. Hide the shell; the
+  // blob shadow stays, so the car still has ground contact.
+  p.view.visible = !firstPerson;
+
+  if (firstPerson) {
+    want.set(p.pos.x + sy * 0.55, p.groundY + 1.30, p.pos.z + cy * 0.55);
     camPos.lerp(want, approach(28, dt));
     lookAhead = 16;
   } else {
@@ -2012,11 +2019,15 @@ function updateCamera(dt) {
 
   shake = Math.max(0, shake - dt * 2.6);
   const rough = (!p.onTrack ? 0.07 : 0) + spd * 0.028 + (p.boosting ? 0.06 : 0);
-  const jitter = shake + rough;
+  // Smooth multi-frequency rumble rather than white noise. Uncorrelated per-frame
+  // jitter reads as static — barely noticeable from the chase cam, but from inside
+  // the car, with the look-at point 16 m ahead, it turns into visible shimmer.
+  const jitter = (shake + rough) * (firstPerson ? 0.35 : 1);
+  const st = Game.now;
   camera.position.set(
-    camPos.x + (Math.random() - 0.5) * jitter,
-    camPos.y + (Math.random() - 0.5) * jitter,
-    camPos.z + (Math.random() - 0.5) * jitter
+    camPos.x + (Math.sin(st * 41.3) * 0.6 + Math.sin(st * 67.9 + 1.3) * 0.4) * jitter,
+    camPos.y + (Math.sin(st * 47.7 + 2.1) * 0.6 + Math.sin(st * 73.1 + 0.4) * 0.4) * jitter,
+    camPos.z + (Math.sin(st * 57.1 + 4.2) * 0.6 + Math.sin(st * 61.3 + 2.8) * 0.4) * jitter
   );
   camera.lookAt(camLook);
   camera.rotation.z += clamp(-p.yawRate * 0.035 + p.drift * 0.04, -0.1, 0.1);
@@ -2282,6 +2293,7 @@ const Game = {
     $('rbest').textContent = fmt(card.best);
     $('rtotal').textContent = fmt(card.total);
     $('rscore').textContent = card.score.toLocaleString();
+    player.view.visible = true;                 // updateCamera stops running once we leave the race
     $('results').classList.remove('hide');
     el.hud.classList.remove('on');
   },
