@@ -178,6 +178,8 @@
   }
   .dbtn.sel{ color:var(--ink); background:var(--cy); border-color:var(--cy); box-shadow:0 0 20px rgba(53,230,255,.5); font-weight:700; }
 
+  #timerow{ display:flex; gap:6px; justify-content:center; margin-top:9px; }
+  .tbtn{ padding:7px 13px; font-size:10px; }
   /* seed picker */
   #seedrow{ display:flex; gap:9px; justify-content:center; align-items:center; margin-top:14px; }
   #seedrow .lbl{ letter-spacing:.24em; }
@@ -324,6 +326,13 @@
       <button class="dbtn sel" data-d="1">PRO</button>
       <button class="dbtn" data-d="2">ACE</button>
     </div>
+    <div id="timerow">
+      <button class="dbtn tbtn sel" data-t="-1">AUTO</button>
+      <button class="dbtn tbtn" data-t="0">DAWN</button>
+      <button class="dbtn tbtn" data-t="1">DAY</button>
+      <button class="dbtn tbtn" data-t="2">GOLDEN</button>
+      <button class="dbtn tbtn" data-t="3">DUSK</button>
+    </div>
     <div id="seedrow">
       <span class="lbl">Circuit</span>
       <input id="seedin" maxlength="12" spellcheck="false" autocomplete="off" value="ALPINE" />
@@ -441,7 +450,8 @@ const CLASSIC = {
   base: 300, sw: [0.55, 1.30],
   rad: [[3, 62, 0.6], [5, 28, 2.1], [2, 34, -0.9]],           // [mode, amplitude, phase]
   elev: [[2, 14, 0.4], [3, 8, -1.2], [5, 3.5, 0.3]],
-  noise: [0, 0]                                                // mountain-range offset
+  noise: [0, 0],                                               // mountain-range offset
+  time: 1                                                      // the original races at midday
 };
 let TRACK = CLASSIC, SEED = 'ALPINE';
 
@@ -593,17 +603,24 @@ function generateTrack(seedStr) {
   SEED = String(seedStr || 'ALPINE').toUpperCase().slice(0, 12).replace(/[^A-Z0-9]/g, '') || 'ALPINE';
   if (SEED === 'ALPINE') {                            // the curated default
     TRACK = CLASSIC; buildCentreline();
-    return { ...measureTrack(), seed: SEED, attempts: 0 };
+    return { ...measureTrack(), seed: SEED, attempts: 0, hour: TIMES[CLASSIC.time].name };
   }
   const rnd = mulberry32(strSeed(SEED));
+  // The hour comes off its own stream. Drawn inside drawParams it was the last
+  // value of each candidate, and since the retry loop discards whole candidates
+  // the surviving draw was badly skewed — 43% DUSK, 10% DAY over 120 seeds.
+  const hourRnd = mulberry32(strSeed(SEED + '#H'));
+  hourRnd(); hourRnd(); hourRnd();          // discard: mulberry32's first outputs track the seed
+  const hour = (hourRnd() * 4) | 0;
   for (let attempt = 1; attempt <= 60; attempt++) {
     TRACK = drawParams(rnd);
+    TRACK.time = hour;
     buildCentreline();
     const m = measureTrack();
-    if (isDrivable(m)) return { ...m, seed: SEED, attempts: attempt };
+    if (isDrivable(m)) return { ...m, seed: SEED, attempts: attempt, hour: TIMES[hour].name };
   }
   TRACK = CLASSIC; buildCentreline();                 // known-good fallback
-  return { ...measureTrack(), seed: SEED, attempts: -1 };
+  return { ...measureTrack(), seed: SEED, attempts: -1, hour: TIMES[CLASSIC.time].name };
 }
 
 /* --------------------- 3. nearest-point queries ------------------------ */
@@ -709,41 +726,87 @@ document.getElementById('app').appendChild(renderer.domElement);
 
 const scene  = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.4, 6000);
-const SKY_LO = new THREE.Color(0xdfeefc), SKY_HI = new THREE.Color(0x3d7fc4);
-scene.fog = new THREE.Fog(0xcfe2f2, 320, 1750);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
 
-/* gradient sky dome */
-(function sky() {
-  const c = document.createElement('canvas'); c.width = 4; c.height = 256;
-  const g = c.getContext('2d').createLinearGradient(0, 0, 0, 256);
-  g.addColorStop(0.00, '#2f74bd'); g.addColorStop(0.34, '#78b4e6');
-  g.addColorStop(0.62, '#b9d9f2'); g.addColorStop(0.80, '#e8f2fb');
-  g.addColorStop(1.00, '#f4ece0');
-  const ctx = c.getContext('2d'); ctx.fillStyle = g; ctx.fillRect(0, 0, 4, 256);
-  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-  scene.add(new THREE.Mesh(
-    new THREE.SphereGeometry(3400, 32, 20),
-    new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false, depthWrite: false })
-  ));
-})();
+/* --------------------------- time of day -------------------------------
+   The mountain reads completely differently depending on where the sun is.
+   `off` is the sun's offset from the player: a small y makes it graze the
+   peaks and throws the long shadows that sell golden hour. Fog is always
+   pulled toward the sky's horizon colour or the two visibly disagree. */
+const TIMES = [
+  { name: 'DAWN', shadowTint: 0x7b85bc, shadowAmt: 0.44,
+    off: [-300, 200, 250], sun: 0xffd4bc, sunI: 2.15,
+    hemiSky: 0xc8d2ec, hemiGnd: 0xe2dad2, hemiI: 0.88, amb: 0x93a2c8, ambI: 0.28,
+    fog: 0xd4cad8, fogNear: 300, fogFar: 1650,
+    sky: ['#33518f', '#6d7fb8', '#c39fb0', '#f0c9a8', '#f7dcc0'] },
+  { name: 'DAY', shadowTint: 0xaabede, shadowAmt: 0.22,
+    off: [-190, 250, 140], sun: 0xfff4e2, sunI: 2.45,
+    hemiSky: 0xcfe6ff, hemiGnd: 0xffffff, hemiI: 0.78, amb: 0xa8c6e6, ambI: 0.24,
+    fog: 0xcfe2f2, fogNear: 320, fogFar: 1750,
+    sky: ['#2f74bd', '#78b4e6', '#b9d9f2', '#e8f2fb', '#f4ece0'] },
+  { name: 'GOLDEN', shadowTint: 0x6f79b4, shadowAmt: 0.42,
+    off: [-330, 210, 120], sun: 0xffc98c, sunI: 2.9,
+    hemiSky: 0xe8d4c4, hemiGnd: 0x93a4d8, hemiI: 0.80, amb: 0x8ea0c8, ambI: 0.20,
+    fog: 0xe6c9a2, fogNear: 280, fogFar: 1560,
+    sky: ['#2b5c9e', '#6f92c8', '#d8a071', '#ffb877', '#ffd9a8'] },
+  { name: 'DUSK', shadowTint: 0x4e5490, shadowAmt: 0.55,
+    off: [-340, 150, 70], sun: 0xff9060, sunI: 2.3,
+    hemiSky: 0xa898c0, hemiGnd: 0x8a86b0, hemiI: 0.78, amb: 0x6f7cb0, ambI: 0.28,
+    fog: 0xa88ab0, fogNear: 240, fogFar: 1380,
+    sky: ['#1b2a5c', '#3f4a86', '#8a5f92', '#d4707a', '#f0a070'] }
+];
 
 const sun = new THREE.DirectionalLight(0xfff4e2, 2.45);
-sun.position.set(-260, 330, 190);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.near = 40; sun.shadow.camera.far = 900;
-sun.shadow.camera.left = -62; sun.shadow.camera.right = 62;
-sun.shadow.camera.top = 62;   sun.shadow.camera.bottom = -62;
+sun.shadow.camera.near = 40; sun.shadow.camera.far = 1100;
+sun.shadow.camera.left = -70; sun.shadow.camera.right = 70;
+sun.shadow.camera.top = 70;   sun.shadow.camera.bottom = -70;
 sun.shadow.bias = -0.0016;
 sun.shadow.normalBias = 0.5;
 scene.add(sun, sun.target);
-scene.add(new THREE.HemisphereLight(0xcfe6ff, 0xffffff, 0.78));
-scene.add(new THREE.AmbientLight(0xa8c6e6, 0.24));
+const hemi = new THREE.HemisphereLight(0xcfe6ff, 0xffffff, 0.78);
+const ambient = new THREE.AmbientLight(0xa8c6e6, 0.24);
+scene.add(hemi, ambient);
+
+const skyDome = new THREE.Mesh(
+  new THREE.SphereGeometry(3400, 32, 20),
+  new THREE.MeshBasicMaterial({ side: THREE.BackSide, fog: false, depthWrite: false })
+);
+scene.add(skyDome);
+scene.fog = new THREE.Fog(0xcfe2f2, 320, 1750);
+
+let TOD = TIMES[1];
+function applyTimeOfDay(i) {
+  TOD = TIMES[clamp(i | 0, 0, TIMES.length - 1)];
+  sun.color.setHex(TOD.sun); sun.intensity = TOD.sunI;
+  // Place it immediately as well as per-frame: updateCamera only runs while the
+  // race is live, so without this the menu and any paused frame light from a
+  // degenerate direction (sun and target both at the origin).
+  sun.position.set(sun.target.position.x + TOD.off[0],
+                   sun.target.position.y + TOD.off[1],
+                   sun.target.position.z + TOD.off[2]);
+  hemi.color.setHex(TOD.hemiSky); hemi.groundColor.setHex(TOD.hemiGnd); hemi.intensity = TOD.hemiI;
+  ambient.color.setHex(TOD.amb); ambient.intensity = TOD.ambI;
+  scene.fog.color.setHex(TOD.fog);
+  scene.fog.near = TOD.fogNear; scene.fog.far = TOD.fogFar;
+
+  const c = document.createElement('canvas'); c.width = 4; c.height = 256;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 256);
+  const stops = [0, 0.34, 0.62, 0.80, 1];
+  TOD.sky.forEach((col, k) => g.addColorStop(stops[k], col));
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 4, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  if (skyDome.material.map) skyDome.material.map.dispose();   // canvas textures leak otherwise
+  skyDome.material.map = tex;
+  skyDome.material.needsUpdate = true;
+}
 
 /* ---------------------------- 6. textures ------------------------------ */
 function canvasTex(w, h, draw, rx = 1, ry = 1) {
@@ -817,6 +880,7 @@ function buildTerrain() {
   const idx = new Uint32Array(SEGS * SEGS * 6);
   const rock = new THREE.Color(0x5c5f69), snow = new THREE.Color(0xf6faff);
   const pine = new THREE.Color(0x35513d), blue = new THREE.Color(0xcfe0f4);
+  const shadowTint = new THREE.Color(TOD.shadowTint);
   const tmp = new THREE.Color();
 
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
@@ -824,6 +888,41 @@ function buildTerrain() {
     const x = (i / SEGS - 0.5) * SIZE, z = (j / SEGS - 0.5) * SIZE;
     pos[k] = x; pos[k + 1] = heightAt(x, z, undefined, true); pos[k + 2] = z;
   }
+  /* Bake sun occlusion into the mesh: march each vertex toward the sun over the
+     height grid and see if a ridge gets in the way. Long shadows off the peaks
+     are what actually sells low-angle light — the real-time shadow map only
+     covers a 70 m box around the player and only cars cast into it. Costs ~30 ms
+     at build time and nothing per frame. Step grows with distance to keep it cheap. */
+  const shade = new Float32Array(n * n);
+  {
+    const L = new THREE.Vector3(TOD.off[0], TOD.off[1], TOD.off[2]).normalize();
+    const cell = SIZE / SEGS, maxD = 900;
+    for (let v = 0; v < n * n; v++) {
+      const k = v * 3, x0 = pos[k], y0 = pos[k + 1], z0 = pos[k + 2];
+      let step = cell * 1.2, t = step, hit = 0;
+      while (t < maxD) {
+        const fi = ((x0 + L.x * t) / SIZE + 0.5) * SEGS;
+        const fj = ((z0 + L.z * t) / SIZE + 0.5) * SEGS;
+        if (fi < 0 || fj < 0 || fi >= SEGS || fj >= SEGS) break;
+        if (pos[(((fj | 0) * n) + (fi | 0)) * 3 + 1] > y0 + L.y * t + 1.2) { hit = 1; break; }
+        step *= 1.08; t += step;
+      }
+      shade[v] = hit;
+    }
+    // soften the edges so the bake doesn't alias along the grid
+    const tmpS = new Float32Array(n * n);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      let s = 0, c = 0;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        const jj = j + dj, ii = i + di;
+        if (jj < 0 || ii < 0 || jj >= n || ii >= n) continue;
+        s += shade[jj * n + ii]; c++;
+      }
+      tmpS[j * n + i] = s / c;
+    }
+    shade.set(tmpS);
+  }
+
   let o = 0;
   for (let j = 0; j < SEGS; j++) for (let i = 0; i < SEGS; i++) {
     const a = j * n + i, b = a + 1, c = a + n, d = c + 1;
@@ -848,6 +947,8 @@ function buildTerrain() {
       if (y < 26 && grit < -0.1) tmp.lerp(pine, clamp(-grit * 0.5, 0, 0.28));
     }
     tmp.multiplyScalar(0.96 + grit * 0.07);
+    // in shadow the snow is lit only by the sky, so it goes cool and dark
+    if (shade[v] > 0.01) tmp.lerp(shadowTint, TOD.shadowAmt * shade[v]);
     col[k] = tmp.r; col[k + 1] = tmp.g; col[k + 2] = tmp.b;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -1029,8 +1130,11 @@ function buildScenery() {
 
 /* One call rebuilds the entire circuit from a seed string. */
 let trackInfo = null;
+let timeChoice = -1;                       // -1 = follow the seed
 function loadTrack(seedStr) {
   trackInfo = generateTrack(seedStr);
+  applyTimeOfDay(timeChoice >= 0 ? timeChoice : (TRACK.time ?? 1));
+  trackInfo.time = TOD.name;
   clearWorld();
   buildTerrain();
   buildRoad();
@@ -1899,7 +2003,7 @@ function updateCamera(dt) {
 
   // keep the shadow frustum tight around the player
   sun.target.position.copy(p.pos);
-  sun.position.set(p.pos.x - 190, p.pos.y + 250, p.pos.z + 140);
+  sun.position.set(p.pos.x + TOD.off[0], p.pos.y + TOD.off[1], p.pos.z + TOD.off[2]);
   snowFall.position.set(camera.position.x, 0, camera.position.z);
 }
 
@@ -2318,8 +2422,8 @@ function showTrackInfo() {
   const shape = t.minCornerRadius < 60 ? 'TECHNICAL' : t.minCornerRadius < 95 ? 'BALANCED' : 'FAST';
   trackInfoEl.innerHTML =
     `<b>${(t.length / 1000).toFixed(2)} KM</b> · <b>${t.corners}</b> CORNERS · ` +
-    `TIGHTEST <b>${Math.round(t.minCornerRadius)}M</b> · <b>${Math.round(t.straightPct)}%</b> FLAT OUT · ${shape}` +
-    (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '');
+    `TIGHTEST <b>${Math.round(t.minCornerRadius)}M</b> · <b>${Math.round(t.straightPct)}%</b> FLAT OUT · ` +
+    `${shape} · <b>${t.time}</b>` + (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '');
   seedIn.value = t.seed;
   const u = new URL(location.href);
   if (t.seed === 'ALPINE') u.searchParams.delete('seed'); else u.searchParams.set('seed', t.seed);
@@ -2337,6 +2441,13 @@ function applySeed(str) {
   drawMap();
   showTrackInfo();
 }
+
+document.querySelectorAll('.tbtn').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.tbtn').forEach(x => x.classList.remove('sel'));
+  b.classList.add('sel');
+  timeChoice = +b.dataset.t;
+  applySeed(seedIn.value);                       // relight; geometry is unchanged
+}));
 
 seedIn.addEventListener('change', () => applySeed(seedIn.value));
 seedIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.stopPropagation(); seedIn.blur(); } });
@@ -2373,6 +2484,7 @@ requestAnimationFrame(() => {
 //   __rush.Game.respawn()          -> pop back onto the racing line
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
+                  TIMES, applyTimeOfDay, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
 </script>
 </body>
