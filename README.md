@@ -143,6 +143,27 @@ those figures were optimistic. Each rival draws a random wander phase per page l
 lap time by ~0.1–0.2 s, and on circuits where two tiers sit close together that is enough to flip
 the ordering. Any tier comparison has to average over several realisations to mean anything.
 
+### Time of day
+
+Each circuit is lit by its own hour — dawn, midday, golden hour or dusk — drawn from the seed, so
+`?seed=MOUNTAIN` always arrives at golden hour. `ALPINE` stays at midday. Override it from the
+title card if you just want to see a particular light.
+
+The lighting alone wasn't enough. Tinting the sun orange turns an alpine valley into a desert:
+everything shifts warm together and the snow reads as sand. What actually sells low sun is
+**shadow** — ridges throwing long shade, with those areas lit only by cool skylight.
+
+The real-time shadow map can't do it: it covers a 70 m box around the player and only cars cast
+into it. So sun occlusion is **baked into the terrain** at build time — each vertex marches a ray
+toward the sun across the height grid, and anything blocked by a ridge is tinted toward a cool
+shadow colour. The step grows with distance, so it costs ~30 ms during a rebuild and nothing per
+frame. That single change is the difference between "orange filter" and golden hour.
+
+Hours are drawn from a stream of their own. Drawn inline with the shape they were the last value of
+each candidate, and because the generator discards whole candidates on retry, the surviving draw
+came out at 43% dusk and 10% midday. Split out and warmed up, it sits within sampling noise of
+uniform over 400 seeds.
+
 ### Slipstream
 
 Tuck in behind another car — within ~30 m and ~3.4 m laterally — and you punch into their hole in
