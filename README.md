@@ -73,6 +73,9 @@ const LIMITS = { minRadius: 46, minR: 165, maxGrade: 0.27, len: [1650, 3000] };
 ```
 
 A candidate that fails any limit is discarded and the next is drawn from the same seeded stream.
+Because the stream is deterministic, the same seed always walks the same sequence and accepts the
+same track. Over 66 test seeds: **zero fallbacks**, 4.7 draws on average, 15 at worst against a cap
+of 60. Generated circuits ranged 1.81–2.31 km with 6–11 corners and tightest radii of 46–104 m.
 
 **Driven.** Geometry proves a layout is *legal*, not that it is any *good*. Circuits kept turning up
 that passed every geometric check and still had the field running wide for 10% of the lap. So a
@@ -97,9 +100,6 @@ It costs ~1.07 drive tests per seed (about 60 ms), and importantly it does **not
 pool — across 30 seeds only the 2 bad circuits changed, and the range of length, corner count,
 tightest radius and flat-out percentage is identical before and after. It removes broken circuits
 without flattening demanding ones.
-Because the stream is deterministic, the same seed always walks the same sequence and accepts the
-same track. Over 66 test seeds: **zero fallbacks**, 4.7 draws on average, 15 at worst against a cap
-of 60. Generated circuits ranged 1.81–2.31 km with 6–11 corners and tightest radii of 46–104 m.
 
 The AI drives them unassisted — on the most technical generated seed (11 corners, 52 m tightest,
 only 26% flat out) all four cars lapped in 38.6–40.4s.
