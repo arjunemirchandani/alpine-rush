@@ -89,6 +89,11 @@
   .row b{ font-weight:500; color:#cfefff; }
   #bestrow b{ color:var(--gn); }
   .sep{ height:1px; background:linear-gradient(90deg, rgba(53,230,255,.45), transparent); margin:8px 0 7px; }
+  #deltarow{ display:flex; justify-content:space-between; gap:14px; align-items:baseline;
+             margin-top:5px; padding-top:5px; border-top:1px solid rgba(53,230,255,.14); }
+  #delta{ font-size:15px; font-weight:700; font-variant-numeric:tabular-nums; color:rgba(223,246,255,.35); }
+  #delta.up{ color:var(--gn); text-shadow:0 0 12px rgba(102,255,168,.6); }
+  #delta.down{ color:var(--mg); text-shadow:0 0 12px rgba(255,62,165,.6); }
 
   /* top-right: position + standings + minimap */
   #tr{ position:absolute; top:16px; right:16px; width:196px; }
@@ -245,6 +250,11 @@
     min-height:14px;
   }
   #trackinfo b{ color:var(--cy); font-weight:500; }
+  #recordrow{ display:flex; gap:12px; justify-content:center; align-items:center; margin-top:12px; }
+  #recordrow .lbl{ letter-spacing:.22em; }
+  #pbtime{ font-size:15px; font-variant-numeric:tabular-nums; color:var(--gn);
+           text-shadow:0 0 12px rgba(102,255,168,.45); font-weight:700; }
+  #ghosttoggle.off{ opacity:.45; }
 
   /* results */
   #rtitle{ font-size:min(62px,9vw); font-weight:800; letter-spacing:.06em; color:#fff; text-shadow:0 0 30px rgba(255,204,51,.55); }
@@ -295,6 +305,7 @@
     <div id="time" class="val">0:00.000</div>
     <div class="row"><span class="lbl">Lap</span><b id="curlap" class="val">0:00.000</b></div>
     <div class="row" id="bestrow"><span class="lbl">Best</span><b id="bestlap" class="val">--:--.---</b></div>
+    <div id="deltarow"><span class="lbl">vs Record</span><b id="delta" class="val">--</b></div>
   </div>
 
   <!-- position + standings + map -->
@@ -388,6 +399,11 @@
       <button class="dbtn" id="reroll">SHUFFLE</button>
     </div>
     <div id="trackinfo"></div>
+    <div id="recordrow">
+      <span class="lbl">Your record</span>
+      <b id="pbtime">--:--.---</b>
+      <button class="dbtn" id="ghosttoggle">GHOST ON</button>
+    </div>
     <button class="btn" id="go">START ENGINE</button>
     <div class="hint">DRIFT TO FILL THE BOOST METER · GAMEPAD SUPPORTED</div>
   </div>
@@ -1892,8 +1908,14 @@ class Car {
       this.lapTimes.push(lt);
       if (lt < this.best) this.best = lt;
       this.lapStart = now;
-      if (this.laps >= LAPS) { this.finished = true; this.finishTime = now; Game.onFinish(this); }
-      else if (this === player && !Game.testing) { Sfx.chime(); Game.lapFlash(lt); }
+      if (this.laps >= LAPS) {
+        if (this === player && !Game.testing) this.lastLapWasBest = Ghost.finishLap(lt);
+        this.finished = true; this.finishTime = now; Game.onFinish(this);
+      }
+      else if (this === player && !Game.testing) {
+        const pb = Ghost.finishLap(lt);
+        Sfx.chime(); Game.lapFlash(lt, pb);
+      }
     }
   }
 
@@ -2147,6 +2169,162 @@ function applyDifficulty() {
   });
 }
 
+/* ------------------- 16b. records and the ghost car ---------------------
+   Seeds make a stored lap time meaningful — JAKDA is the same circuit on any
+   machine — so bests are keyed by seed. The ghost trace is sampled at a fixed
+   rate and carries the arc length with each sample, which serves both jobs:
+   index by time to draw the ghost, or search by arc length to answer "how far
+   ahead of my best am I, right here". */
+const STORE_KEY = 'alpineRush.v1', GHOST_HZ = 20, MAX_STORED = 25;
+
+const Records = {
+  ok: true, data: { circuits: {}, totals: { races: 0, wins: 0, drift: 0 } },
+
+  load() {
+    // Reset first: assigning over the existing object left stale records in
+    // memory after storage was cleared, so a reload did not actually reload.
+    this.data = { circuits: {}, totals: { races: 0, wins: 0, drift: 0 } };
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed.circuits) this.data.circuits = parsed.circuits;
+      if (parsed.totals) Object.assign(this.data.totals, parsed.totals);
+    } catch (e) { this.ok = false; }        // private mode / storage disabled
+  },
+  save() {
+    if (!this.ok) return;
+    try {
+      const keys = Object.keys(this.data.circuits);
+      if (keys.length > MAX_STORED) {       // bound the footprint, oldest out first
+        keys.sort((a, b) => (this.data.circuits[a].at || 0) - (this.data.circuits[b].at || 0));
+        for (const k of keys.slice(0, keys.length - MAX_STORED)) delete this.data.circuits[k];
+      }
+      localStorage.setItem(STORE_KEY, JSON.stringify(this.data));
+    } catch (e) { this.ok = false; }        // quota exceeded: carry on without saving
+  },
+  best(seed) { const c = this.data.circuits[seed]; return c ? c.best : null; },
+  trace(seed) { const c = this.data.circuits[seed]; return c ? c.g : null; },
+  submit(seed, lapMs, trace) {
+    const c = this.data.circuits[seed];
+    if (c && c.best <= lapMs) return false;
+    this.data.circuits[seed] = { best: lapMs, g: trace, at: Date.now() };
+    this.save();
+    return true;
+  },
+  bumpRace(won, drift) {
+    this.data.totals.races++; if (won) this.data.totals.wins++;
+    this.data.totals.drift += drift | 0; this.save();
+  }
+};
+Records.load();
+
+const Ghost = {
+  enabled: true, rec: [], recT: 0, play: null, mesh: null, delta: null,
+
+  /* quantised on the way out: 0.1 m of position, 0.001 rad of heading */
+  pack(rec) {
+    const x = [], z = [], a = [], s = [];
+    let prev = -Infinity;
+    for (const p of rec) {
+      // timeAtS() binary-searches s, which only works while s rises through the
+      // lap. A trace that ran past the finish line wraps back to zero and would
+      // be misread silently, so stop at the wrap instead of storing it.
+      if (p.s + 1 < prev) break;
+      prev = p.s;
+      x.push(Math.round(p.x * 10)); z.push(Math.round(p.z * 10));
+      a.push(Math.round(p.yaw * 1000)); s.push(Math.round(p.s * 10));
+    }
+    return { hz: GHOST_HZ, x, z, a, s };
+  },
+  unpack(g) {
+    if (!g || !g.x || g.x.length < 4) return null;
+    const n = g.x.length, out = { hz: g.hz || GHOST_HZ, n,
+      x: new Float32Array(n), z: new Float32Array(n), a: new Float32Array(n), s: new Float32Array(n) };
+    for (let i = 0; i < n; i++) {
+      out.x[i] = g.x[i] / 10; out.z[i] = g.z[i] / 10;
+      out.a[i] = g.a[i] / 1000; out.s[i] = g.s[i] / 10;
+    }
+    for (let i = 1; i < n; i++) if (out.s[i] + 1 < out.s[i - 1]) return null;  // refuse a wrapped trace
+    return out;
+  },
+
+  loadFor(seed) { this.play = this.unpack(Records.trace(seed)); this.delta = null; },
+  startLap() { this.rec.length = 0; this.recT = 0; this.delta = null; },
+
+  sample(dt) {
+    if (Game.testing || Game.autopilot || Game.state !== 'race') return;
+    this.recT += dt;
+    if (this.recT >= this.rec.length / GHOST_HZ) {
+      this.rec.push({ x: player.pos.x, z: player.pos.z, yaw: player.yaw, s: player.s });
+    }
+  },
+
+  /* called with a completed lap time; keeps it if it beats the stored best */
+  finishLap(lapMs) {
+    if (Game.testing || Game.autopilot || this.rec.length < 10) { this.startLap(); return false; }
+    const improved = Records.submit(SEED, lapMs, this.pack(this.rec));
+    if (improved) this.loadFor(SEED);
+    this.startLap();
+    return improved;
+  },
+
+  /* where the ghost was t seconds into its lap */
+  at(t) {
+    const g = this.play; if (!g) return null;
+    const f = t * g.hz, i = Math.floor(f);
+    if (i < 0 || i >= g.n - 1) return null;              // before the start or already home
+    const u = f - i;
+    return { x: lerp(g.x[i], g.x[i + 1], u), z: lerp(g.z[i], g.z[i + 1], u),
+             yaw: g.a[i] + wrapPi(g.a[i + 1] - g.a[i]) * u };
+  },
+
+  /* how long the best lap took to reach this point on the circuit */
+  timeAtS(s) {
+    const g = this.play; if (!g) return null;
+    if (s < g.s[0] || s > g.s[g.n - 1]) return null;
+    let lo = 0, hi = g.n - 1;
+    while (lo < hi - 1) { const m = (lo + hi) >> 1; if (g.s[m] <= s) lo = m; else hi = m; }
+    const span = g.s[hi] - g.s[lo];
+    const u = span > 0.01 ? (s - g.s[lo]) / span : 0;
+    return (lo + u) / g.hz;
+  },
+
+  ensureMesh() {
+    if (this.mesh) return;
+    const b = buildCar(0x8fdcff, 0xffffff);
+    this.mesh = b.group;
+    this.mesh.traverse(o => {
+      if (!o.isMesh || !o.material) return;
+      o.material.transparent = true; o.material.opacity = 0.28;
+      o.material.depthWrite = false;
+      o.castShadow = false; o.receiveShadow = false;
+    });
+    // The exhaust flames live at opacity 0 and are driven per-frame by the boost
+    // state; the blanket opacity above would otherwise pin them visible forever.
+    for (const f of b.flames) f.visible = false;
+    this.mesh.visible = false;
+    scene.add(this.mesh);
+  },
+
+  update() {
+    this.ensureMesh();
+    const live = this.enabled && this.play && Game.state === 'race' && !Game.autopilot;
+    if (!live) { this.mesh.visible = false; this.delta = null; return; }
+    const t = (Game.raceTime - player.lapStart) / 1000;
+    const p = this.at(t);
+    if (p) {
+      this.mesh.visible = true;
+      this.mesh.position.set(p.x, heightAt(p.x, p.z) + 0.02, p.z);
+      this.mesh.rotation.set(0, p.yaw, 0);
+    } else {
+      this.mesh.visible = false;                          // ghost has finished its lap
+    }
+    const gt = this.timeAtS(player.s);
+    this.delta = gt == null ? null : t - gt;               // negative == up on your best
+  }
+};
+
 /* ---------------------------- 17. camera ------------------------------- */
 const CAMS = ['CHASE', 'HOOD', 'CINEMA'];
 let camMode = 0;
@@ -2216,6 +2394,7 @@ const el = {
   pos: $('pos'), stand: $('stand'), spdfill: $('spdfill'), spdnum: $('spdnum'), gear: $('gear'),
   bl: $('bl'), score: $('score'), count: $('count'), toast: $('toast'), pop: $('driftpop'),
   lines: $('speedlines'), flash: $('flash'), dmg: $('dmg'), map: $('map'), boostlbl: $('boostlbl'),
+  delta: $('delta'), deltarow: $('deltarow'),
   towfill: document.querySelector('#towbar i')
 };
 const boostSegs = [];
@@ -2285,6 +2464,15 @@ function updateHUD(dt) {
   el.time.textContent = fmt(Game.raceTime);
   el.curlap.textContent = fmt(Game.raceTime - p.lapStart);
   el.bestlap.textContent = fmt(p.best);
+
+  const d = Ghost.delta;
+  if (d == null) {
+    el.delta.textContent = Ghost.play ? '--' : 'NO RECORD';
+    el.delta.className = 'val';
+  } else {
+    el.delta.textContent = (d < 0 ? '-' : '+') + Math.abs(d).toFixed(2);
+    el.delta.className = 'val ' + (d < 0 ? 'up' : 'down');
+  }
 
   const order = cars.slice().sort(cmpRace);
   const rank = order.indexOf(p);
@@ -2358,6 +2546,7 @@ const Game = {
     this.raceTime = 0; this.finishOrder = []; this.projected = null;
     resetPhys(0x9E3779B9);
     Sfx.stopMusic();
+    Ghost.loadFor(SEED); Ghost.startLap();
     clearTimeout(this.resultTimer); this.resultCard = null;
     camPos.copy(player.pos).add(new THREE.Vector3(0, 6, -16));
     this.countdown = 3.0;
@@ -2462,7 +2651,12 @@ const Game = {
     }).join('');
     $('rnote').textContent = anyProjected
       ? '◦ projected — simulated to the flag after you finished' : '';
+    Records.bumpRace(rank === 0, card.score);
     $('rbest').textContent = fmt(card.best);
+    if (player.lastLapWasBest || Records.best(card.seed) === card.best) {
+      $('rbest').style.color = 'var(--mg)';
+      $('rbest').style.textShadow = '0 0 14px rgba(255,62,165,.6)';
+    } else { $('rbest').style.color = ''; $('rbest').style.textShadow = ''; }
     $('rtotal').textContent = fmt(card.total);
     $('rscore').textContent = card.score.toLocaleString();
     player.view.visible = true;                 // updateCamera stops running once we leave the race
@@ -2470,9 +2664,11 @@ const Game = {
     el.hud.classList.remove('on');
   },
 
-  lapFlash(lt) {
+  lapFlash(lt, personalBest) {
     const isBest = lt <= player.best;
-    toast(`LAP ${player.laps} — ${fmt(lt)}${isBest ? '  ★ BEST' : ''}`, 2200, isBest ? '#66ffa8' : '#ffcc33');
+    const tag = personalBest ? '  ★ NEW RECORD' : isBest ? '  ★ BEST' : '';
+    toast(`LAP ${player.laps} — ${fmt(lt)}${tag}`, 2200,
+          personalBest ? '#ff3ea5' : isBest ? '#66ffa8' : '#ffcc33');
   },
 
   hit(v) {
@@ -2518,6 +2714,7 @@ const Game = {
     cars.forEach((c, i) => c.placeOnGrid(i));
     cars.forEach(c => c.updateVisual(0.016, this.now));
     player.view.visible = true;           // first-person hides it; updateCamera has stopped
+    if (Ghost.mesh) Ghost.mesh.visible = false;
     camPos.set(player.pos.x - 18, player.pos.y + 9, player.pos.z - 22);
     camLook.copy(player.pos);
     camera.position.copy(camPos); camera.lookAt(camLook);
@@ -2670,6 +2867,8 @@ function frame() {
     const running = stepSim(dt);
 
     for (const c of cars) c.updateVisual(dt, Game.now);
+    Ghost.sample(dt);
+    Ghost.update();
     updateParticles(dt);
     flushSkids();
     skidMat.uniforms.uTime.value = Game.now;
@@ -2727,6 +2926,13 @@ const seedIn = $('seedin'), trackInfoEl = $('trackinfo');
 
 function showTrackInfo() {
   const t = trackInfo;
+  const pb = Records.best(SEED);
+  $('pbtime').textContent = pb ? fmt(pb) : '--:--.---';
+  $('pbtime').style.color = pb ? '' : 'rgba(223,246,255,.3)';
+  const gt = $('ghosttoggle');
+  gt.textContent = Ghost.enabled ? 'GHOST ON' : 'GHOST OFF';
+  gt.classList.toggle('off', !Ghost.enabled);
+  gt.disabled = !pb;
   const shape = t.minCornerRadius < 60 ? 'TECHNICAL' : t.minCornerRadius < 95 ? 'BALANCED' : 'FAST';
   const drive = !t.drive ? ''
     : t.bestEffort ? ` · <span style="color:var(--am)">BEST OF ${t.tests} DRIVEN</span>`
@@ -2762,6 +2968,7 @@ document.querySelectorAll('.tbtn').forEach(b => b.addEventListener('click', () =
 
 seedIn.addEventListener('change', () => applySeed(seedIn.value));
 seedIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.stopPropagation(); seedIn.blur(); } });
+$('ghosttoggle').addEventListener('click', () => { Ghost.enabled = !Ghost.enabled; showTrackInfo(); });
 $('reroll').addEventListener('click', () => {
   let s = '';
   for (let i = 0; i < 5; i++) s += 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[(Math.random() * 32) | 0];
@@ -2790,7 +2997,7 @@ requestAnimationFrame(() => {
 //   __rush.Game.respawn()          -> pop back onto the racing line
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
-                  driveTest, DRIVE,
+                  driveTest, DRIVE, Records, Ghost,
                   TIMES, applyTimeOfDay, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
 </script>

@@ -106,6 +106,28 @@ only 26% flat out) all four cars lapped in 38.6–40.4s.
 
 ---
 
+## Records and the ghost
+
+Your best lap on each circuit is kept in `localStorage`, keyed by seed — so `JAKDA` means the same
+track on any machine and a stored time is actually comparable. The title card shows your record for
+the selected circuit, and beating it flashes **★ NEW RECORD**.
+
+Alongside the time, the lap itself is recorded and replayed as a translucent **ghost** you race
+against, with a live delta on the HUD: `−0.34` in green when you're up on your record, `+0.12` in
+magenta when you're down. Toggle it with **GHOST ON/OFF**.
+
+The trace is sampled at 20 Hz and each sample carries its arc length, which serves both jobs at
+once — index by *time* to draw the ghost, or binary-search by *arc length* to answer "how far ahead
+am I, right here". Positions are quantised to 0.1 m and headings to 0.001 rad, giving ~17 KB per
+lap and 0.03 m of replay error; storage is capped at 25 circuits, oldest evicted first.
+
+The arc-length search only works while `s` rises monotonically through the lap, so a trace that ran
+past the finish line is truncated on write and rejected on read rather than silently misread.
+
+Laps driven by autopilot are never recorded — records should mean you drove it.
+
+---
+
 ## How it works
 
 ### The track is an analytic curve, not a spline
