@@ -7,6 +7,16 @@ No build step, no bundler, no assets — every texture, sound and mesh is genera
 open alpine-rush.html
 ```
 
+Or serve the folder and hit the origin — `index.html` is a short redirect that hands off to the
+game, carrying `?seed=…` across so shared circuit links still work:
+
+```bash
+python3 -m http.server 8123 --bind 127.0.0.1
+```
+
+The game itself is still the one file; `index.html` exists so a served folder doesn't greet you
+with a directory listing, and so GitHub Pages would serve it from the repo root as-is.
+
 Needs a network connection on first load for the Three.js module (from unpkg). Everything else is self-contained.
 
 ---
