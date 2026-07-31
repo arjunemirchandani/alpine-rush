@@ -114,6 +114,9 @@ without flattening demanding ones.
 The AI drives them unassisted — on the most technical generated seed (11 corners, 52 m tightest,
 only 26% flat out) all four cars lapped in 38.6–40.4s.
 
+The engineering write-up for each change is archived in
+[`docs/PULL-REQUESTS.md`](docs/PULL-REQUESTS.md).
+
 ---
 
 ## Records and the ghost
