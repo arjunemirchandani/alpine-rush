@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Alpine Rush</title>
+<style>html,body{height:100%;margin:0;background:#05070c;}</style>
+<script>
+  /* Serving the folder shows a directory listing at the origin, so this hands
+     straight off to the game. search and hash are carried across or a shared
+     ?seed=JAKDA link would silently lose its circuit; replace() rather than
+     assign() so the redirect does not sit in the back history. */
+  location.replace('alpine-rush.html' + location.search + location.hash);
+</script>
+</head>
+<body>
+<noscript>
+  <a href="alpine-rush.html"
+     style="color:#35e6ff;font-family:ui-monospace,Menlo,monospace;font-size:14px;
+            letter-spacing:.2em;display:block;padding:32px">OPEN ALPINE RUSH &rarr;</a>
+</noscript>
+</body>
+</html>
