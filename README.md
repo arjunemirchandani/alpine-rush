@@ -3,6 +3,15 @@
 A complete 3D arcade racer in a **single HTML file**. Three laps, three AI rivals, one mountain.
 No build step, no bundler, no assets — every texture, sound and mesh is generated at runtime.
 
+### ▶ [Play it now — arjunemirchandani.github.io/alpine-rush](https://arjunemirchandani.github.io/alpine-rush/)
+
+No install, no build. Every circuit is shareable as a link:
+[`?seed=JAKDA`](https://arjunemirchandani.github.io/alpine-rush/?seed=JAKDA) ·
+[`?seed=MOUNTAIN`](https://arjunemirchandani.github.io/alpine-rush/?seed=MOUNTAIN) ·
+[`?seed=6P8RA`](https://arjunemirchandani.github.io/alpine-rush/?seed=6P8RA)
+
+Or run it locally:
+
 ```bash
 open alpine-rush.html
 ```
@@ -18,6 +27,47 @@ The game itself is still the one file; `index.html` exists so a served folder do
 with a directory listing, and so GitHub Pages would serve it from the repo root as-is.
 
 Needs a network connection on first load for the Three.js module (from unpkg). Everything else is self-contained.
+
+---
+
+## Hosting this on GitHub Pages (free)
+
+Worth writing down, because a game like this needs no infrastructure at all — the whole deployment
+is *push to `main`*.
+
+**Cost is zero.** GitHub Pages is free for public repositories on a Free account; only *private*
+repos need a paid plan for Pages. The soft limits are 1 GB of site size and 100 GB/month of
+bandwidth. This site is ~140 KB, and Three.js is fetched from unpkg rather than from Pages, so the
+bandwidth ceiling sits somewhere north of half a million plays a month.
+
+**Enabling it** is one API call, or Settings → Pages → deploy from `main` / root:
+
+```bash
+echo '{"source":{"branch":"main","path":"/"}}' | gh api -X POST repos/OWNER/REPO/pages --input -
+```
+
+There is no build step and no workflow file. Pages serves the repository root as static files, so
+committing an HTML file is the deploy.
+
+**Two details that are easy to get wrong:**
+
+*Serving the root.* Without an `index.html`, the origin shows a directory listing rather than your
+game. This repo keeps the descriptive filename and adds a small `index.html` that hands off:
+
+```js
+location.replace('alpine-rush.html' + location.search + location.hash);
+```
+
+Carrying `location.search` across is the part people miss — drop it and every shared `?seed=…`
+link silently loses its circuit and lands on the default, which looks like the app is broken rather
+than the redirect. `replace()` rather than `assign()` keeps the hop out of the back history.
+
+*Your email is in the commit metadata.* Git records the author and committer address on every
+commit, and those are public once the repo is. Check with `git log --format='%ae' | sort -u`, and
+if you'd rather not publish it, GitHub issues you a
+`ID+username@users.noreply.github.com` address. Note that rewriting history and force-pushing is
+**not** enough on its own: merged pull requests keep their original commits alive under
+`refs/pull/N/head`, so the old addresses stay reachable from the PR pages.
 
 ---
 
