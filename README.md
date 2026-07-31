@@ -114,7 +114,12 @@ the selected circuit, and beating it flashes **★ NEW RECORD**.
 
 Alongside the time, the lap itself is recorded and replayed as a translucent **ghost** you race
 against, with a live delta on the HUD: `−0.34` in green when you're up on your record, `+0.12` in
-magenta when you're down. Toggle it with **GHOST ON/OFF**.
+magenta when you're down.
+
+**GHOST ON/OFF** hides the ghost if you'd rather drive without it; the choice is remembered across
+sessions and is independent of the record, which stays either way. **CLEAR** wipes the record and
+ghost for the selected circuit so you can chase it fresh — it takes two presses, the first arming
+the button, since it can't be undone.
 
 The trace is sampled at 20 Hz and each sample carries its arc length, which serves both jobs at
 once — index by *time* to draw the ghost, or binary-search by *arc length* to answer "how far ahead

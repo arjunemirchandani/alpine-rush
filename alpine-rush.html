@@ -255,6 +255,9 @@
   #pbtime{ font-size:15px; font-variant-numeric:tabular-nums; color:var(--gn);
            text-shadow:0 0 12px rgba(102,255,168,.45); font-weight:700; }
   #ghosttoggle.off{ opacity:.45; }
+  #clearrec{ border-color:rgba(255,62,165,.35); color:rgba(255,62,165,.8); }
+  #clearrec:hover{ background:rgba(255,62,165,.10); }
+  #clearrec.arm{ background:var(--mg); border-color:var(--mg); color:var(--ink); font-weight:700; }
 
   /* results */
   #rtitle{ font-size:min(62px,9vw); font-weight:800; letter-spacing:.06em; color:#fff; text-shadow:0 0 30px rgba(255,204,51,.55); }
@@ -403,6 +406,7 @@
       <span class="lbl">Your record</span>
       <b id="pbtime">--:--.---</b>
       <button class="dbtn" id="ghosttoggle">GHOST ON</button>
+      <button class="dbtn" id="clearrec">CLEAR</button>
     </div>
     <button class="btn" id="go">START ENGINE</button>
     <div class="hint">DRIFT TO FILL THE BOOST METER · GAMEPAD SUPPORTED</div>
@@ -2183,13 +2187,14 @@ const Records = {
   load() {
     // Reset first: assigning over the existing object left stale records in
     // memory after storage was cleared, so a reload did not actually reload.
-    this.data = { circuits: {}, totals: { races: 0, wins: 0, drift: 0 } };
+    this.data = { circuits: {}, totals: { races: 0, wins: 0, drift: 0 }, prefs: { ghost: true } };
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (parsed.circuits) this.data.circuits = parsed.circuits;
       if (parsed.totals) Object.assign(this.data.totals, parsed.totals);
+      if (parsed.prefs) Object.assign(this.data.prefs, parsed.prefs);
     } catch (e) { this.ok = false; }        // private mode / storage disabled
   },
   save() {
@@ -2212,6 +2217,8 @@ const Records = {
     this.save();
     return true;
   },
+  clear(seed) { delete this.data.circuits[seed]; this.save(); },
+  setPref(k, v) { this.data.prefs[k] = v; this.save(); },
   bumpRace(won, drift) {
     this.data.totals.races++; if (won) this.data.totals.wins++;
     this.data.totals.drift += drift | 0; this.save();
@@ -2220,7 +2227,8 @@ const Records = {
 Records.load();
 
 const Ghost = {
-  enabled: true, rec: [], recT: 0, play: null, mesh: null, delta: null,
+  enabled: Records.data.prefs.ghost !== false,
+  rec: [], recT: 0, play: null, mesh: null, delta: null,
 
   /* quantised on the way out: 0.1 m of position, 0.001 rad of heading */
   pack(rec) {
@@ -2282,7 +2290,10 @@ const Ghost = {
   /* how long the best lap took to reach this point on the circuit */
   timeAtS(s) {
     const g = this.play; if (!g) return null;
-    if (s < g.s[0] || s > g.s[g.n - 1]) return null;
+    // A trace starts a metre or two past the line and ends a metre or two short,
+    // so clamp inside that margin rather than blanking the delta at each lap edge.
+    if (s < g.s[0] - 40 || s > g.s[g.n - 1] + 40) return null;
+    s = clamp(s, g.s[0], g.s[g.n - 1]);
     let lo = 0, hi = g.n - 1;
     while (lo < hi - 1) { const m = (lo + hi) >> 1; if (g.s[m] <= s) lo = m; else hi = m; }
     const span = g.s[hi] - g.s[lo];
@@ -2929,10 +2940,16 @@ function showTrackInfo() {
   const pb = Records.best(SEED);
   $('pbtime').textContent = pb ? fmt(pb) : '--:--.---';
   $('pbtime').style.color = pb ? '' : 'rgba(223,246,255,.3)';
+  // A preference, not a function of whether a record exists — disabling it made
+  // the button look live while doing nothing, which reads as broken.
   const gt = $('ghosttoggle');
   gt.textContent = Ghost.enabled ? 'GHOST ON' : 'GHOST OFF';
   gt.classList.toggle('off', !Ghost.enabled);
-  gt.disabled = !pb;
+
+  const cb = $('clearrec');
+  cb.style.display = pb ? '' : 'none';        // nothing to clear, nothing to show
+  cb.textContent = 'CLEAR'; cb.classList.remove('arm');
+  clearArmedAt = 0;
   const shape = t.minCornerRadius < 60 ? 'TECHNICAL' : t.minCornerRadius < 95 ? 'BALANCED' : 'FAST';
   const drive = !t.drive ? ''
     : t.bestEffort ? ` · <span style="color:var(--am)">BEST OF ${t.tests} DRIVEN</span>`
@@ -2968,7 +2985,33 @@ document.querySelectorAll('.tbtn').forEach(b => b.addEventListener('click', () =
 
 seedIn.addEventListener('change', () => applySeed(seedIn.value));
 seedIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.stopPropagation(); seedIn.blur(); } });
-$('ghosttoggle').addEventListener('click', () => { Ghost.enabled = !Ghost.enabled; showTrackInfo(); });
+$('ghosttoggle').addEventListener('click', () => {
+  Ghost.enabled = !Ghost.enabled;
+  Records.setPref('ghost', Ghost.enabled);    // remember it across sessions
+  if (Ghost.mesh && !Ghost.enabled) Ghost.mesh.visible = false;
+  showTrackInfo();
+});
+
+/* Clearing a record is not undoable, so it takes two presses: the first arms the
+   button for three seconds, the second commits. No dialog, no accidents. */
+let clearArmedAt = 0;
+$('clearrec').addEventListener('click', () => {
+  const cb = $('clearrec'), now = Date.now();
+  if (now - clearArmedAt > 3000) {
+    clearArmedAt = now;
+    cb.textContent = 'ERASE?'; cb.classList.add('arm');
+    setTimeout(() => {
+      if (Date.now() - clearArmedAt >= 3000) { cb.textContent = 'CLEAR'; cb.classList.remove('arm'); }
+    }, 3050);
+    return;
+  }
+  Records.clear(SEED);
+  Ghost.loadFor(SEED);                        // drop the loaded trace with it
+  if (Ghost.mesh) Ghost.mesh.visible = false;
+  clearArmedAt = 0;
+  showTrackInfo();
+  toast('RECORD CLEARED — ' + SEED, 1600, '#ff3ea5');
+});
 $('reroll').addEventListener('click', () => {
   let s = '';
   for (let i = 0; i < 5; i++) s += 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[(Math.random() * 32) | 0];
