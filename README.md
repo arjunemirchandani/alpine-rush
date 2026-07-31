@@ -10,6 +10,17 @@ No install, no build. Every circuit is shareable as a link:
 [`?seed=MOUNTAIN`](https://arjunemirchandani.github.io/alpine-rush/?seed=MOUNTAIN) ·
 [`?seed=6P8RA`](https://arjunemirchandani.github.io/alpine-rush/?seed=6P8RA)
 
+![Four cars mid-drift through a golden-hour alpine valley, HUD showing the field covered by three tenths](docs/screenshots/gameplay.jpg)
+
+*The whole field covered by 0.3s, mid-drift with the slipstream engaged. Terrain, lighting, cars,
+tyre smoke and every sound are generated at runtime — there is not a single asset file.*
+
+![The pre-race configuration screen showing circuit, difficulty and time-of-day options](docs/screenshots/title.jpg)
+
+*Every circuit is a seed. `D7XYK` is 2.03 km with 7 corners, lit at golden hour and drive-tested at
+0.72% off-track — layout, elevation, mountains, forest and hour all derived from those five
+characters.*
+
 Or run it locally:
 
 ```bash
