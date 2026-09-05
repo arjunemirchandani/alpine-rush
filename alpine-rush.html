@@ -1909,6 +1909,7 @@ class Car {
     const now = Game.raceTime;
     if (this.laps > 0) {
       const lt = now - this.lapStart;
+      if (this === player) LapTrace.roll();
       this.lapTimes.push(lt);
       if (lt < this.best) this.best = lt;
       this.lapStart = now;
@@ -2336,6 +2337,44 @@ const Ghost = {
   }
 };
 
+/* Time gained or lost against the ghost on each stretch of the lap, for the
+   map's heat trace. Segment j is the run of centreline samples j*8 .. j*8+7,
+   matching the minimap's points, so player.hint >> 3 is the current segment.
+   Ghost.delta is the running total (t - ghost time, negative = ahead); the
+   change in it across one segment is what that stretch cost or earned. */
+const LapTrace = {
+  cur: null,      // Float32Array per segment: +s gained, -s lost, NaN not driven yet
+  last: null,     // the most recently completed lap, for the results card
+  seg: -1, delta: null,
+
+  reset() { this.cur = null; this.last = null; this.seg = -1; this.delta = null; },
+
+  update() {
+    if (Game.state !== 'race') return;
+    const n = MAPPTS.length;
+    if (!this.cur || this.cur.length !== n) this.cur = new Float32Array(n).fill(NaN);
+    const j = player.hint >> 3, d = Ghost.delta;
+    if (j === this.seg) return;
+    // only a clean step into the next segment measures anything; a spin, a
+    // respawn or a null delta (off the ghost's trace) just resyncs
+    if (this.seg >= 0 && j === (this.seg + 1) % n && d != null && this.delta != null)
+      this.cur[this.seg] = this.delta - d;
+    this.seg = j; this.delta = d;
+  },
+
+  /* the player crossed the line: close the last segment with the delta as it
+     stood a frame ago, then keep the lap. Runs from Car.onLap() inside the
+     physics step, before Ghost.update() restarts the delta for the new lap. */
+  roll() {
+    if (this.cur) {
+      const n = this.cur.length, d = Ghost.delta;
+      if (this.seg === n - 1 && d != null && this.delta != null) this.cur[this.seg] = this.delta - d;
+      this.last = this.cur;
+    }
+    this.cur = null; this.seg = -1; this.delta = null;
+  }
+};
+
 /* ---------------------------- 17. camera ------------------------------- */
 const CAMS = ['CHASE', 'HOOD', 'CINEMA'];
 let camMode = 0;
@@ -2609,7 +2648,7 @@ const Game = {
     this.raceTime = 0; this.finishOrder = []; this.projected = null;
     resetPhys(0x9E3779B9);
     Sfx.stopMusic();
-    Ghost.loadFor(SEED); Ghost.startLap();
+    Ghost.loadFor(SEED); Ghost.startLap(); LapTrace.reset();
     clearTimeout(this.resultTimer); this.resultCard = null;
     camPos.copy(player.pos).add(new THREE.Vector3(0, 6, -16));
     this.countdown = 3.0;
@@ -2932,6 +2971,7 @@ function frame() {
     for (const c of cars) c.updateVisual(dt, Game.now);
     Ghost.sample(dt);
     Ghost.update();
+    LapTrace.update();
     updateParticles(dt);
     flushSkids();
     skidMat.uniforms.uTime.value = Game.now;
