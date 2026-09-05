@@ -190,6 +190,17 @@ Alongside the time, the lap itself is recorded and replayed as a translucent **g
 against, with a live delta on the HUD: `−0.34` in green when you're up on your record, `+0.12` in
 magenta when you're down.
 
+The minimap turns that delta into a picture. As you lap, each stretch of the circuit is tinted by
+how much time it gained or lost against the record — **green** where you were quicker than the
+ghost, **magenta** where you weren't, brighter the bigger the difference. A stretch that merely
+matched the record stays on the map's elevation shading, so colour always means something happened
+there. The same trace, for your final lap, is shown large on the results card:
+
+![The results card with the finishing order beside a lap map tinted green and magenta where the final lap gained and lost time against the record](docs/screenshots/results.jpg)
+
+*Time lost to the record is drawn where it was lost. 0.08 s on one ~12 m segment is full colour;
+smaller deltas blend only partway, so a clean lap reads quiet and a mistake reads loud.*
+
 **GHOST ON/OFF** hides the ghost if you'd rather drive without it; the choice is remembered across
 sessions and is independent of the record, which stays either way. **CLEAR** wipes the record and
 ghost for the selected circuit so you can chase it fresh — it takes two presses, the first arming
