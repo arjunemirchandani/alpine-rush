@@ -8,7 +8,8 @@ No build step, no bundler, no assets — every texture, sound and mesh is genera
 No install, no build. Every circuit is shareable as a link:
 [`?seed=JAKDA`](https://arjunemirchandani.github.io/alpine-rush/?seed=JAKDA) ·
 [`?seed=MOUNTAIN`](https://arjunemirchandani.github.io/alpine-rush/?seed=MOUNTAIN) ·
-[`?seed=6P8RA`](https://arjunemirchandani.github.io/alpine-rush/?seed=6P8RA)
+[`?seed=6P8RA`](https://arjunemirchandani.github.io/alpine-rush/?seed=6P8RA) —
+or a whole four-round championship: [`?cup=JAKDA`](https://arjunemirchandani.github.io/alpine-rush/?cup=JAKDA)
 
 ![Four cars mid-drift through a golden-hour alpine valley, HUD showing the field covered by three tenths](docs/screenshots/gameplay.jpg)
 
@@ -215,6 +216,35 @@ The arc-length search only works while `s` rises monotonically through the lap, 
 past the finish line is truncated on write and rejected on read rather than silently misread.
 
 Laps driven by autopilot are never recorded — records should mean you drove it.
+
+---
+
+## Championship mode
+
+**CHAMPIONSHIP** on the title screen turns a race into a series: four rounds, points for every
+finisher (**10 / 6 / 3 / 1**), a running table, and a champion at the end.
+
+A cup is a seed, just like a circuit. `JAKDA` as a cup derives its four round circuits from that
+seed (`CH768 → S7Z3L → W3ELF → RBLSB`), each a normal shareable circuit the generator drive-tests
+like any other — so [`?cup=JAKDA`](https://arjunemirchandani.github.io/alpine-rush/?cup=JAKDA) is
+the same series for anyone who opens it, and two people can race it on separate machines and
+compare tables.
+
+A few deliberate rules:
+
+- **Results are decided at the flag**, from the same finishing order the results card shows —
+  real times for cars that have finished, projected times for those still out. Nothing done at the
+  card (or instead of it) can lose a round.
+- **No retries.** RACE AGAIN becomes NEXT ROUND. The pause menu's RESTART still restarts the round
+  you're in, because nothing is committed until you cross the line.
+- **Difficulty locks at the start** of the cup; time of day follows each round's seed.
+- **A cup survives a reload.** Leave mid-series and the title screen offers CONTINUE · ROUND *n*
+  with the standings, or ABANDON CUP (two presses, like CLEAR).
+
+The three rivals keep the personalities they always had — VIPER is **ruthless**, FROST is
+**clean**, KAIJU is **wild** — the cup just gives you four races to notice. Ties on points go to
+wins, then to whoever finished ahead most recently. Your totals count cups completed and titles
+won.
 
 ---
 
