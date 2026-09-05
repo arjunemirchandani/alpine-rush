@@ -2445,14 +2445,37 @@ function buildMap() {
   const pad = 18, size = 320;
   const sc = (size - pad * 2) / Math.max(maxX - minX, maxZ - minZ);
   MAPPTS.to = (x, z) => [pad + (x - minX) * sc, pad + (z - minZ) * sc];
-  for (let i = 0; i <= N; i += 8) MAPPTS.push(MAPPTS.to(PX[i % N], PZ[i % N]));
+  // each sample carries its height as a 0..1 fraction of the circuit's range,
+  // so drawMap() can grade the line from valley to summit without re-scanning
+  let minY = 1e9, maxY = -1e9;
+  for (let i = 0; i < N; i++) { minY = Math.min(minY, PY[i]); maxY = Math.max(maxY, PY[i]); }
+  const ySpan = Math.max(maxY - minY, 1);
+  for (let i = 0; i <= N; i += 8) {
+    const p = MAPPTS.to(PX[i % N], PZ[i % N]);
+    p.h = (PY[i % N] - minY) / ySpan;
+    MAPPTS.push(p);
+  }
+}
+/* valley -> summit: the UI cyan warming through white to a snow-lit gold */
+function elevColor(h, a) {
+  const r = h < 0.5 ? lerp(53, 235, h * 2) : lerp(235, 255, (h - 0.5) * 2);
+  const gr = h < 0.5 ? lerp(230, 246, h * 2) : lerp(246, 214, (h - 0.5) * 2);
+  const b = h < 0.5 ? lerp(255, 255, h * 2) : lerp(255, 120, (h - 0.5) * 2);
+  return `rgba(${r | 0},${gr | 0},${b | 0},${a})`;
 }
 function drawMap() {
   const g = mapCtx; g.clearRect(0, 0, 320, 320);
   g.lineJoin = g.lineCap = 'round';
   g.strokeStyle = 'rgba(53,230,255,.22)'; g.lineWidth = 17;
   g.beginPath(); MAPPTS.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath(); g.stroke();
-  g.strokeStyle = 'rgba(53,230,255,.55)'; g.lineWidth = 2.4; g.stroke();
+  // the core line is stroked one segment at a time so its colour can follow
+  // the height of the road: a flat loop and a mountain pass no longer look alike
+  g.lineWidth = 2.6;
+  for (let i = 1; i < MAPPTS.length; i++) {
+    const a = MAPPTS[i - 1], b = MAPPTS[i];
+    g.strokeStyle = elevColor((a.h + b.h) * 0.5, 1);       // opaque: translucent joints bead
+    g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+  }
   const sl = MAPPTS.to(PX[0], PZ[0]);
   g.fillStyle = '#ffcc33'; g.fillRect(sl[0] - 5, sl[1] - 5, 10, 10);
   // the record ghost is what VS RECORD measures against, so it belongs on the
