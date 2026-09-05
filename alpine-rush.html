@@ -2455,12 +2455,32 @@ function drawMap() {
   g.strokeStyle = 'rgba(53,230,255,.55)'; g.lineWidth = 2.4; g.stroke();
   const sl = MAPPTS.to(PX[0], PZ[0]);
   g.fillStyle = '#ffcc33'; g.fillRect(sl[0] - 5, sl[1] - 5, 10, 10);
-  for (const c of cars) {
-    const p = MAPPTS.to(c.pos.x, c.pos.z);
-    g.beginPath(); g.arc(p[0], p[1], c.ai ? 7 : 9.5, 0, 6.2832);
-    g.fillStyle = '#' + c.color.toString(16).padStart(6, '0'); g.fill();
-    if (!c.ai) { g.strokeStyle = '#fff'; g.lineWidth = 3; g.stroke(); }
+  // the record ghost is what VS RECORD measures against, so it belongs on the
+  // map too: a hollow dashed ring, under the cars so the player stays on top
+  if (Ghost.mesh && Ghost.mesh.visible) {
+    const p = MAPPTS.to(Ghost.mesh.position.x, Ghost.mesh.position.z);
+    g.beginPath(); g.arc(p[0], p[1], 8, 0, 6.2832);
+    g.setLineDash([3, 2.5]); g.strokeStyle = 'rgba(223,246,255,.9)'; g.lineWidth = 2; g.stroke();
+    g.setLineDash([]);
   }
+  for (const c of cars) {
+    mapChevron(c.pos.x, c.pos.z, c.yaw, c.ai ? 7 : 9);
+    g.fillStyle = '#' + c.color.toString(16).padStart(6, '0'); g.fill();
+    if (!c.ai) { g.strokeStyle = '#fff'; g.lineWidth = 2.5; g.stroke(); }
+  }
+}
+/* A chevron pointing along the car's heading. buildMap() maps world X to
+   canvas x and world Z to canvas y with no flip, so the forward vector
+   (sin yaw, cos yaw) from Car.step() is the same direction here. */
+function mapChevron(x, z, yaw, r) {
+  const p = MAPPTS.to(x, z), g = mapCtx;
+  const fx = Math.sin(yaw), fy = Math.cos(yaw), rx = fy, ry = -fx;
+  g.beginPath();
+  g.moveTo(p[0] + fx * r * 1.3, p[1] + fy * r * 1.3);                 // nose
+  g.lineTo(p[0] - fx * r + rx * r, p[1] - fy * r + ry * r);           // rear corners
+  g.lineTo(p[0] - fx * r * 0.4, p[1] - fy * r * 0.4);                 // notch
+  g.lineTo(p[0] - fx * r - rx * r, p[1] - fy * r - ry * r);
+  g.closePath();
 }
 
 let mapTick = 0, driftScore = 0, driftRun = 0, driftMult = 1, bankedScore = 0;
