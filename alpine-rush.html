@@ -2480,8 +2480,8 @@ function drawMap() {
   // the core line is stroked one segment at a time so its colour can follow
   // the height of the road: a flat loop and a mountain pass no longer look alike
   g.lineWidth = 2.6;
-  for (let i = 1; i < MAPPTS.length; i++) {
-    const a = MAPPTS[i - 1], b = MAPPTS[i];
+  for (let i = 1; i <= MAPPTS.length; i++) {              // <= : the last segment closes the loop
+    const a = MAPPTS[i - 1], b = MAPPTS[i % MAPPTS.length];
     g.strokeStyle = elevColor((a.h + b.h) * 0.5, 1);       // opaque: translucent joints bead
     g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
   }
