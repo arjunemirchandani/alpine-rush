@@ -16,11 +16,11 @@ or a whole four-round championship: [`?cup=JAKDA`](https://arjunemirchandani.git
 *The whole field covered by 0.3s, mid-drift with the slipstream engaged. Terrain, lighting, cars,
 tyre smoke and every sound are generated at runtime — there is not a single asset file.*
 
-![The pre-race configuration screen showing circuit, difficulty and time-of-day options](docs/screenshots/title.jpg)
+![The title screen mid-championship: cup SYSDJ at round 2 of 4, the four round seeds listed with the first struck through, difficulty locked, and CONTINUE · ROUND 2](docs/screenshots/title.jpg)
 
-*Every circuit is a seed. `D7XYK` is 2.03 km with 7 corners, lit at golden hour and drive-tested at
-0.72% off-track — layout, elevation, mountains, forest and hour all derived from those five
-characters.*
+*Every circuit is a seed, and so is every championship. Cup `SYSDJ` derives its four rounds from
+those five characters; round two, `6WNXB`, is 1.86 km with 12 corners, drive-tested before you ever
+see it. The seed, shuffle and difficulty lock while a cup is running.*
 
 Or run it locally:
 
@@ -197,10 +197,11 @@ ghost, **magenta** where you weren't, brighter the bigger the difference. A stre
 matched the record stays on the map's elevation shading, so colour always means something happened
 there. The same trace, for your final lap, is shown large on the results card:
 
-![The results card with the finishing order beside a lap map tinted green and magenta where the final lap gained and lost time against the record](docs/screenshots/results.jpg)
+![The results card after round 1 of a cup: the finishing order beside a lap map tinted green and magenta where the final lap gained and lost time against the record, then the championship standings with points gained and totals](docs/screenshots/results.jpg)
 
 *Time lost to the record is drawn where it was lost. 0.08 s on one ~12 m segment is full colour;
-smaller deltas blend only partway, so a clean lap reads quiet and a mistake reads loud.*
+smaller deltas blend only partway, so a clean lap reads quiet and a mistake reads loud. In a
+championship the standings follow, with the points this round earned.*
 
 **GHOST ON/OFF** hides the ghost if you'd rather drive without it; the choice is remembered across
 sessions and is independent of the record, which stays either way. **CLEAR** wipes the record and
