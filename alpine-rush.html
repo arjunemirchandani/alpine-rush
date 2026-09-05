@@ -695,8 +695,11 @@ function isDrivable(m) {
 
 /* Draw candidates until one measures as drivable. Deterministic per seed:
    the same seed always walks the same sequence and accepts the same track. */
+function cleanSeed(str) {
+  return String(str || 'ALPINE').toUpperCase().slice(0, 12).replace(/[^A-Z0-9]/g, '') || 'ALPINE';
+}
 function generateTrack(seedStr) {
-  SEED = String(seedStr || 'ALPINE').toUpperCase().slice(0, 12).replace(/[^A-Z0-9]/g, '') || 'ALPINE';
+  SEED = cleanSeed(seedStr);
   if (SEED === 'ALPINE') {                            // the curated default
     TRACK = CLASSIC; buildCentreline();
     return { ...measureTrack(), seed: SEED, attempts: 0, hour: TIMES[CLASSIC.time].name };
@@ -2202,7 +2205,7 @@ const Records = {
   load() {
     // Reset first: assigning over the existing object left stale records in
     // memory after storage was cleared, so a reload did not actually reload.
-    this.data = { circuits: {}, totals: { races: 0, wins: 0, drift: 0 }, prefs: { ghost: true } };
+    this.data = { circuits: {}, totals: { races: 0, wins: 0, drift: 0 }, prefs: { ghost: true }, cup: null };
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (!raw) return;
@@ -2210,6 +2213,7 @@ const Records = {
       if (parsed.circuits) this.data.circuits = parsed.circuits;
       if (parsed.totals) Object.assign(this.data.totals, parsed.totals);
       if (parsed.prefs) Object.assign(this.data.prefs, parsed.prefs);
+      if (parsed.cup) this.data.cup = parsed.cup;
     } catch (e) { this.ok = false; }        // private mode / storage disabled
   },
   save() {
@@ -2387,6 +2391,64 @@ const LapTrace = {
     }
     this.cur = null; this.seg = -1; this.delta = null;
   }
+};
+
+/* ------------------- 16c. championship ---------------------------------
+   A cup is a seed. Its rounds are ordinary circuits derived from that seed,
+   so a cup is as shareable as a circuit and two people can race the same
+   series. Points come from the finishing order the results card shows and
+   are awarded at the flag; the whole thing lives in Records so a reload
+   resumes it rather than losing it. */
+const CUP_ROUNDS = 4, CUP_POINTS = [10, 6, 3, 1];
+const CUP_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const TRAITS = { VIPER: 'RUTHLESS', FROST: 'CLEAN', KAIJU: 'WILD' };
+const Cup = {
+  get data() { return Records.data.cup || null; },
+  get active() { return !!this.data; },
+  get done() { return this.active && this.data.round >= CUP_ROUNDS; },
+
+  /* five characters from a hash of cup seed and round number: a normal,
+     shareable circuit seed that the generator drive-tests like any other */
+  roundSeed(cupSeed, i) {
+    const rng = mulberry32(strSeed(cleanSeed(cupSeed) + '#' + i));
+    let s = '';
+    for (let k = 0; k < 5; k++) s += CUP_ALPHABET[(rng() * 32) | 0];
+    return s;
+  },
+  rounds(cupSeed) {
+    const r = [];
+    for (let i = 0; i < CUP_ROUNDS; i++) r.push(this.roundSeed(cupSeed, i));
+    return r;
+  },
+  currentSeed() { return this.active && !this.done ? this.roundSeed(this.data.seed, this.data.round) : null; },
+
+  start(cupSeed, diffIndex) {
+    Records.data.cup = { seed: cleanSeed(cupSeed), diff: diffIndex, round: 0,
+                         points: cars.map(() => 0), wins: cars.map(() => 0), results: [] };
+    Records.save();
+    return Records.data.cup;
+  },
+
+  /* order: every car, best finish first, for the round just completed */
+  award(order) {
+    const c = this.data; if (!c || c.round >= CUP_ROUNDS) return null;
+    const pos = cars.map(car => order.indexOf(car));
+    pos.forEach((p, i) => { c.points[i] += CUP_POINTS[p] || 0; if (p === 0) c.wins[i]++; });
+    c.results.push(pos);
+    c.round++;
+    Records.save();
+    return this.standings();
+  },
+
+  /* points, then wins, then whoever finished ahead most recently */
+  standings() {
+    const c = this.data; if (!c) return [];
+    const last = c.results[c.results.length - 1] || cars.map(() => 0);
+    return cars.map((car, i) => ({ car, i, points: c.points[i], wins: c.wins[i], trait: TRAITS[car.name] || '' }))
+      .sort((a, b) => b.points - a.points || b.wins - a.wins || last[a.i] - last[b.i]);
+  },
+
+  abandon() { Records.data.cup = null; Records.save(); }
 };
 
 /* ---------------------------- 17. camera ------------------------------- */
@@ -3170,7 +3232,7 @@ requestAnimationFrame(() => {
 //   __rush.Game.respawn()          -> pop back onto the racing line
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
-                  driveTest, DRIVE, Records, Ghost, LapTrace,
+                  driveTest, DRIVE, Records, Ghost, LapTrace, Cup,
                   TIMES, applyTimeOfDay, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
 </script>
