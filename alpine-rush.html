@@ -295,6 +295,12 @@
   .rrow .tm.proj{ color:rgba(223,246,255,.45); font-style:italic; }
   .rrow .tm.proj::after{ content:' \25E6'; color:var(--am); font-style:normal; }
   #rnote{ margin-top:9px; font-size:9.5px; letter-spacing:.16em; color:rgba(223,246,255,.34); min-height:12px; }
+  #rcup{ margin:18px auto 0; max-width:470px; }
+  #rcup.hide{ display:none; }
+  #rcuphead{ font-size:10.5px; letter-spacing:.3em; color:var(--am); margin-bottom:6px; }
+  .rrow .tr{ font-size:9px; letter-spacing:.18em; color:rgba(223,246,255,.35); width:76px; text-align:left; }
+  .rrow .gd{ font-size:11px; color:var(--gn); width:34px; text-align:right; font-variant-numeric:tabular-nums; }
+  .rrow .pt{ font-weight:800; color:var(--am); width:40px; text-align:right; font-variant-numeric:tabular-nums; }
   #rstats{ display:flex; justify-content:center; gap:38px; margin-top:20px; }
   #rstats div{ text-align:center; }
   #rstats .v{ font-size:22px; color:var(--gn); font-variant-numeric:tabular-nums; text-shadow:0 0 14px rgba(102,255,168,.4); }
@@ -465,6 +471,10 @@
       </div>
     </div>
     <div id="rnote"></div>
+    <div id="rcup" class="hide">
+      <div id="rcuphead"></div>
+      <div id="rcupgrid"></div>
+    </div>
     <div id="rstats">
       <div><div class="lbl">Best Lap</div><div class="v" id="rbest">--</div></div>
       <div><div class="lbl">Total</div><div class="v" id="rtotal">--</div></div>
@@ -1695,7 +1705,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyM') toast(Sfx.toggleMute() ? 'AUDIO MUTED' : 'AUDIO ON', 900);
   if (e.code === 'KeyC') Game.cycleCam();
   if (e.code === 'KeyR') Game.respawn();
-  if (e.code === 'Enter' && Game.state === 'done') Game.restart();
+  if (e.code === 'Enter' && Game.state === 'done') Game.advance();
 });
 addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) { keys[k] = false; e.preventDefault(); } });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
@@ -2774,8 +2784,18 @@ const Game = {
     el.hud.classList.add('on');
     $('title').classList.add('hide'); $('results').classList.add('hide'); $('pause').classList.add('hide');
     this.lastBeep = 4;
+    if (this.inCup) toast(`ROUND ${Cup.data.round + 1} OF ${CUP_ROUNDS} · ${SEED}`, 2600, '#ffcc33');
   },
+  /* the same race again: the round is not committed until the flag */
   restart() { this.begin(); },
+  get inCup() { return mode === 'cup' && Cup.active && !Cup.done; },
+  /* what RACE AGAIN / NEXT ROUND / Enter does once a race is over */
+  advance() {
+    if (mode !== 'cup') return this.begin();
+    if (!Cup.active || Cup.done) return this.toMenu();
+    applySeed(Cup.currentSeed());
+    this.begin();
+  },
 
   tickCount(dt) {
     this.countdown -= dt;
@@ -2830,9 +2850,17 @@ const Game = {
       this.projected = this.projectFinish();
       // Snapshot the numbers now: the card renders 1.4s later, and Enter restarts
       // the race during exactly that window, which would blank them out.
+      const { final, timeOf } = this.finalOrder();
       this.resultCard = { rank, best: player.best, total: player.finishTime,
                           score: bankedScore + Math.round(driftScore), seed: SEED,
-                          diff: DIFF[diff].name };
+                          diff: DIFF[diff].name, final, timeOf, cup: null };
+      // a cup round is decided here, from the same order the card will show,
+      // so nothing done at the card (or instead of it) can lose the result
+      if (this.inCup) {
+        const round = Cup.data.round + 1;
+        Cup.award(final);
+        this.resultCard.cup = { round, standings: Cup.standings(), done: Cup.done };
+      }
       this.resultTimer = setTimeout(() => this.showResults(rank), 1400);
       toast('FINISH', 2000, '#ffcc33');
       el.flash.style.transition = 'none'; el.flash.style.opacity = '0.6';
@@ -2840,13 +2868,9 @@ const Game = {
     }
   },
 
-  showResults(rank) {
-    const card = this.resultCard || { rank, best: player.best, total: player.finishTime,
-                                      score: bankedScore + Math.round(driftScore),
-                                      seed: SEED, diff: DIFF[diff].name };
-    const order = cars.slice().sort(cmpRace);
-    $('rtitle').textContent = rank === 0 ? 'VICTORY' : rank === 1 ? 'SO CLOSE' : 'FINISH';
-    $('rsub').textContent = `${ORD[rank]}${SUF[rank]} PLACE · ${card.diff} · CIRCUIT ${card.seed}`;
+  /* every car in finishing order: real times first, projected ones after,
+     anything without either (a stuck car) last by progress */
+  finalOrder() {
     const proj = this.projected || new Map();
     const timeOf = c => c.finished ? { t: c.finishTime, projected: false }
                                    : (proj.get(c) || null);
@@ -2855,6 +2879,17 @@ const Game = {
       if (a2 && b2) return a2.t - b2.t;
       return a2 ? -1 : b2 ? 1 : y.progress - x.progress;         // unfinished last
     });
+    return { final, timeOf };
+  },
+
+  showResults(rank) {
+    const card = this.resultCard || { rank, best: player.best, total: player.finishTime,
+                                      score: bankedScore + Math.round(driftScore),
+                                      seed: SEED, diff: DIFF[diff].name, ...this.finalOrder(), cup: null };
+    $('rtitle').textContent = rank === 0 ? 'VICTORY' : rank === 1 ? 'SO CLOSE' : 'FINISH';
+    $('rsub').textContent = `${ORD[rank]}${SUF[rank]} PLACE · ${card.diff} · CIRCUIT ${card.seed}` +
+                            (card.cup ? ` · ROUND ${card.cup.round} OF ${CUP_ROUNDS}` : '');
+    const { final, timeOf } = card;
     const winner = timeOf(final[0]);
     let anyProjected = false;
     $('rgrid').innerHTML = final.map((c, i) => {
@@ -2883,6 +2918,19 @@ const Game = {
     const trace = LapTrace.last, drove = !!trace && trace.some(v => v === v);
     $('rmap').classList.toggle('hide', !drove);
     if (drove) paintMap($('lapmap').getContext('2d'), trace, false);
+    $('rcup').classList.toggle('hide', !card.cup);
+    if (card.cup) {
+      const { round, standings, done } = card.cup;
+      $('rcuphead').textContent = `CHAMPIONSHIP · AFTER ROUND ${round} OF ${CUP_ROUNDS}`;
+      $('rcupgrid').innerHTML = standings.map((r, i) => {
+        const gained = CUP_POINTS[final.indexOf(r.car)] || 0;
+        return `<div class="rrow${r.car.ai ? '' : ' me'}"><span class="p">${i + 1}</span>
+         <span class="dot" style="color:#${r.car.color.toString(16).padStart(6, '0')};width:8px;height:8px;border-radius:50%;background:currentColor"></span>
+         <span class="nm">${r.car.name}</span><span class="tr">${r.trait}</span>
+         <span class="gd">${gained ? '+' + gained : ''}</span><span class="pt">${r.points}</span></div>`;
+      }).join('');
+      $('again').textContent = done ? 'FINAL STANDINGS' : 'NEXT ROUND';
+    } else $('again').textContent = 'RACE AGAIN';
     player.view.visible = true;                 // updateCamera stops running once we leave the race
     $('results').classList.remove('hide');
     el.hud.classList.remove('on');
@@ -3311,7 +3359,7 @@ $('go').addEventListener('click', () => {
   }
   Game.begin();
 });
-$('again').addEventListener('click', () => Game.restart());
+$('again').addEventListener('click', () => Game.advance());
 $('resume').addEventListener('click', () => Game.togglePause());
 $('quit').addEventListener('click', () => { $('pause').classList.add('hide'); Game.restart(); });
 $('tomenu').addEventListener('click', () => Game.toMenu());
