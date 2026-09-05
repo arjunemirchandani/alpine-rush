@@ -298,6 +298,11 @@
   #rcup{ margin:18px auto 0; max-width:470px; }
   #rcup.hide{ display:none; }
   #rcuphead{ font-size:10.5px; letter-spacing:.3em; color:var(--am); margin-bottom:6px; }
+  #rchamp{ font-size:15px; font-weight:800; letter-spacing:.22em; color:#fff; margin:2px 0 10px;
+           text-shadow:0 0 18px rgba(255,204,51,.8), 0 0 40px rgba(255,204,51,.4); }
+  #rchamp.hide{ display:none; }
+  #rchamp b{ color:var(--am); }
+  #rtitle.cup{ text-shadow:0 0 30px rgba(255,204,51,.9), 0 0 70px rgba(255,204,51,.45); }
   .rrow .tr{ font-size:9px; letter-spacing:.18em; color:rgba(223,246,255,.35); width:76px; text-align:left; }
   .rrow .gd{ font-size:11px; color:var(--gn); width:34px; text-align:right; font-variant-numeric:tabular-nums; }
   .rrow .pt{ font-weight:800; color:var(--am); width:40px; text-align:right; font-variant-numeric:tabular-nums; }
@@ -473,6 +478,7 @@
     <div id="rnote"></div>
     <div id="rcup" class="hide">
       <div id="rcuphead"></div>
+      <div id="rchamp" class="hide"></div>
       <div id="rcupgrid"></div>
     </div>
     <div id="rstats">
@@ -2232,12 +2238,12 @@ function applyDifficulty() {
 const STORE_KEY = 'alpineRush.v1', GHOST_HZ = 20, MAX_STORED = 25;
 
 const Records = {
-  ok: true, data: { circuits: {}, totals: { races: 0, wins: 0, drift: 0 } },
+  ok: true, data: { circuits: {}, totals: { races: 0, wins: 0, drift: 0, cups: 0, titles: 0 } },
 
   load() {
     // Reset first: assigning over the existing object left stale records in
     // memory after storage was cleared, so a reload did not actually reload.
-    this.data = { circuits: {}, totals: { races: 0, wins: 0, drift: 0 }, prefs: { ghost: true }, cup: null };
+    this.data = { circuits: {}, totals: { races: 0, wins: 0, drift: 0, cups: 0, titles: 0 }, prefs: { ghost: true }, cup: null };
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (!raw) return;
@@ -2273,7 +2279,8 @@ const Records = {
   bumpRace(won, drift) {
     this.data.totals.races++; if (won) this.data.totals.wins++;
     this.data.totals.drift += drift | 0; this.save();
-  }
+  },
+  bumpCup(won) { this.data.totals.cups++; if (won) this.data.totals.titles++; this.save(); }
 };
 Records.load();
 
@@ -2480,7 +2487,15 @@ const Cup = {
       .sort((a, b) => b.points - a.points || b.wins - a.wins || last[a.i] - last[b.i]);
   },
 
-  abandon() { Records.data.cup = null; Records.save(); }
+  abandon() { Records.data.cup = null; Records.save(); },
+  /* the fourth flag: count the cup in the totals and let go of it, so the
+     title goes back to offering a new one. The card keeps its own snapshot. */
+  close() {
+    const won = this.standings()[0].car === player;
+    Records.bumpCup(won);
+    this.abandon();
+    return won;
+  }
 };
 
 /* ---------------------------- 17. camera ------------------------------- */
@@ -2859,7 +2874,8 @@ const Game = {
       if (this.inCup) {
         const round = Cup.data.round + 1;
         Cup.award(final);
-        this.resultCard.cup = { round, standings: Cup.standings(), done: Cup.done };
+        this.resultCard.cup = { round, standings: Cup.standings(), done: Cup.done, seed: Cup.data.seed };
+        if (Cup.done) Cup.close();
       }
       this.resultTimer = setTimeout(() => this.showResults(rank), 1400);
       toast('FINISH', 2000, '#ffcc33');
@@ -2886,9 +2902,16 @@ const Game = {
     const card = this.resultCard || { rank, best: player.best, total: player.finishTime,
                                       score: bankedScore + Math.round(driftScore),
                                       seed: SEED, diff: DIFF[diff].name, ...this.finalOrder(), cup: null };
-    $('rtitle').textContent = rank === 0 ? 'VICTORY' : rank === 1 ? 'SO CLOSE' : 'FINISH';
-    $('rsub').textContent = `${ORD[rank]}${SUF[rank]} PLACE · ${card.diff} · CIRCUIT ${card.seed}` +
-                            (card.cup ? ` · ROUND ${card.cup.round} OF ${CUP_ROUNDS}` : '');
+    // the last flag of a cup headlines the cup, not the race: the race order
+    // is still on the card below
+    const cupPos = card.cup && card.cup.done ? card.cup.standings.findIndex(r => r.car === player) : -1;
+    $('rtitle').textContent = cupPos < 0 ? (rank === 0 ? 'VICTORY' : rank === 1 ? 'SO CLOSE' : 'FINISH')
+                            : ['CHAMPION', 'RUNNER-UP', 'PODIUM', 'SEASON OVER'][cupPos];
+    $('rtitle').classList.toggle('cup', cupPos === 0);
+    $('rsub').textContent = cupPos < 0
+      ? `${ORD[rank]}${SUF[rank]} PLACE · ${card.diff} · CIRCUIT ${card.seed}` +
+        (card.cup ? ` · ROUND ${card.cup.round} OF ${CUP_ROUNDS}` : '')
+      : `CUP ${card.cup.seed} COMPLETE · ${card.diff} · ${ORD[rank]}${SUF[rank]} IN THE FINAL ROUND`;
     const { final, timeOf } = card;
     const winner = timeOf(final[0]);
     let anyProjected = false;
@@ -2921,7 +2944,12 @@ const Game = {
     $('rcup').classList.toggle('hide', !card.cup);
     if (card.cup) {
       const { round, standings, done } = card.cup;
-      $('rcuphead').textContent = `CHAMPIONSHIP · AFTER ROUND ${round} OF ${CUP_ROUNDS}`;
+      $('rcuphead').textContent = done ? `FINAL STANDINGS · CUP ${card.cup.seed}`
+                                       : `CHAMPIONSHIP · AFTER ROUND ${round} OF ${CUP_ROUNDS}`;
+      const champ = standings[0];
+      $('rchamp').classList.toggle('hide', !done);
+      $('rchamp').innerHTML = champ.car === player ? '★ YOU TAKE THE CUP ★'
+        : `★ <b>${champ.car.name}</b>${champ.trait ? ' · ' + champ.trait : ''} TAKES THE CUP`;
       $('rcupgrid').innerHTML = standings.map((r, i) => {
         const gained = CUP_POINTS[final.indexOf(r.car)] || 0;
         return `<div class="rrow${r.car.ai ? '' : ' me'}"><span class="p">${i + 1}</span>
@@ -2929,7 +2957,7 @@ const Game = {
          <span class="nm">${r.car.name}</span><span class="tr">${r.trait}</span>
          <span class="gd">${gained ? '+' + gained : ''}</span><span class="pt">${r.points}</span></div>`;
       }).join('');
-      $('again').textContent = done ? 'FINAL STANDINGS' : 'NEXT ROUND';
+      $('again').textContent = done ? 'NEW CUP' : 'NEXT ROUND';
     } else $('again').textContent = 'RACE AGAIN';
     player.view.visible = true;                 // updateCamera stops running once we leave the race
     $('results').classList.remove('hide');
@@ -2993,6 +3021,8 @@ const Game = {
     fov = 72; camera.fov = fov; camera.updateProjectionMatrix();
     drawMap();
     showTrackInfo();
+    // a cup has moved on since this circuit was loaded: preview the next round
+    if (cleanSeed(previewSeed()) !== SEED) applySeed(previewSeed());
   },
 
   cycleCam() {
