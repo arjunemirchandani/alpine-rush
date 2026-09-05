@@ -2468,6 +2468,15 @@ function drawMap() {
   g.lineJoin = g.lineCap = 'round';
   g.strokeStyle = 'rgba(53,230,255,.22)'; g.lineWidth = 17;
   g.beginPath(); MAPPTS.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath(); g.stroke();
+  // the stretch of this lap already driven glows brighter, so the map doubles
+  // as a distance-to-line gauge; it resets at the line with the lap counter
+  if (Game.state === 'race' && !player.finished) {
+    g.strokeStyle = 'rgba(53,230,255,.5)';
+    g.beginPath(); g.moveTo(MAPPTS[0][0], MAPPTS[0][1]);
+    for (let i = 1; i < MAPPTS.length && CUM[i * 8] <= player.s; i++) g.lineTo(MAPPTS[i][0], MAPPTS[i][1]);
+    const p = MAPPTS.to(player.pos.x, player.pos.z); g.lineTo(p[0], p[1]);
+    g.stroke();
+  }
   // the core line is stroked one segment at a time so its colour can follow
   // the height of the road: a flat loop and a mountain pass no longer look alike
   g.lineWidth = 2.6;
