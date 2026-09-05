@@ -234,6 +234,22 @@
 
   #timerow{ display:flex; gap:6px; justify-content:center; margin-top:9px; }
   .tbtn{ padding:7px 13px; font-size:10px; }
+  #diff.locked .dbtn:not(.sel){ opacity:.3; pointer-events:none; }
+  /* mode picker */
+  #moderow{ display:flex; gap:9px; justify-content:center; margin-top:16px; }
+  .mbtn{ padding:8px 18px; font-size:10.5px; }
+  .mbtn.sel{ background:var(--am); border-color:var(--am); box-shadow:0 0 20px rgba(255,204,51,.45); }
+  #seedin:disabled, #reroll:disabled{ opacity:.45; pointer-events:none; }
+  #cupinfo{ margin-top:7px; font-size:10.5px; letter-spacing:.19em; color:rgba(255,204,51,.75); min-height:14px; }
+  #cupinfo.hide{ display:none; }
+  #cupinfo b{ color:var(--am); font-weight:700; }
+  #cupinfo .r{ color:rgba(223,246,255,.4); }
+  #cupinfo .r.now{ color:#fff; text-shadow:0 0 10px rgba(255,255,255,.5); }
+  #cupinfo .r.done{ text-decoration:line-through; }
+  #abandon{ margin:14px 0 0 10px; vertical-align:bottom; border-color:rgba(255,62,165,.35); color:rgba(255,62,165,.8); }
+  #abandon.hide{ display:none; }
+  #abandon:hover{ background:rgba(255,62,165,.10); }
+  #abandon.arm{ background:var(--mg); border-color:var(--mg); color:var(--ink); font-weight:700; }
   /* seed picker */
   #seedrow{ display:flex; gap:9px; justify-content:center; align-items:center; margin-top:14px; }
   #seedrow .lbl{ letter-spacing:.24em; }
@@ -404,12 +420,17 @@
       <button class="dbtn tbtn" data-t="2">GOLDEN</button>
       <button class="dbtn tbtn" data-t="3">DUSK</button>
     </div>
+    <div id="moderow">
+      <button class="dbtn mbtn sel" data-m="race">SINGLE RACE</button>
+      <button class="dbtn mbtn" data-m="cup">CHAMPIONSHIP</button>
+    </div>
     <div id="seedrow">
-      <span class="lbl">Circuit</span>
+      <span class="lbl" id="seedlbl">Circuit</span>
       <input id="seedin" maxlength="12" spellcheck="false" autocomplete="off" value="ALPINE" />
       <button class="dbtn" id="reroll">SHUFFLE</button>
     </div>
     <div id="trackinfo"></div>
+    <div id="cupinfo" class="hide"></div>
     <div id="recordrow">
       <span class="lbl">Your record</span>
       <b id="pbtime">--:--.---</b>
@@ -417,6 +438,7 @@
       <button class="dbtn" id="clearrec">CLEAR</button>
     </div>
     <button class="btn" id="go">START ENGINE</button>
+    <button class="dbtn hide" id="abandon">ABANDON CUP</button>
     <div class="hint">DRIFT TO FILL THE BOOST METER · GAMEPAD SUPPORTED</div>
   </div>
 </div>
@@ -3146,13 +3168,17 @@ function showTrackInfo() {
   const drive = !t.drive ? ''
     : t.bestEffort ? ` · <span style="color:var(--am)">BEST OF ${t.tests} DRIVEN</span>`
     : ` · <span style="color:var(--gn)">DRIVE-TESTED ${t.drive.offPct}% OFF</span>`;
+  showCupInfo();
   trackInfoEl.innerHTML =
     `<b>${(t.length / 1000).toFixed(2)} KM</b> · <b>${t.corners}</b> CORNERS · ` +
     `TIGHTEST <b>${Math.round(t.minCornerRadius)}M</b> · <b>${Math.round(t.straightPct)}%</b> FLAT OUT · ` +
     `${shape} · <b>${t.time}</b>` + (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '') + drive;
-  seedIn.value = t.seed;
+  if (mode === 'race') seedIn.value = t.seed;   // in cup mode the input holds the cup seed
+  // the address bar shares what you'd want shared: the circuit, or the cup
   const u = new URL(location.href);
-  if (t.seed === 'ALPINE') u.searchParams.delete('seed'); else u.searchParams.set('seed', t.seed);
+  u.searchParams.delete('seed'); u.searchParams.delete('cup');
+  if (mode === 'cup') u.searchParams.set('cup', Cup.active ? Cup.data.seed : cleanSeed(seedIn.value));
+  else if (t.seed !== 'ALPINE') u.searchParams.set('seed', t.seed);
   history.replaceState(null, '', u);
 }
 
@@ -3168,14 +3194,82 @@ function applySeed(str) {
   showTrackInfo();
 }
 
+/* ---- mode: a single race on the typed circuit, or a four-round cup on the
+   typed cup seed. In cup mode the preview shows the round about to be raced,
+   so SEED (the circuit) and the input (the cup) deliberately differ. ---- */
+let mode = 'race';
+function setMode(m) {
+  mode = m;
+  document.querySelectorAll('.mbtn').forEach(b => b.classList.toggle('sel', b.dataset.m === m));
+  Records.setPref('mode', m);
+  refreshMode();
+}
+/* what the title should preview: the active cup's next round, else the typed
+   cup's first round, else the typed circuit */
+function previewSeed() {
+  if (mode !== 'cup') return seedIn.value;
+  if (Cup.active && !Cup.done) return Cup.currentSeed();
+  return Cup.roundSeed(seedIn.value, 0);
+}
+/* reload the preview; showTrackInfo() -> showCupInfo() then sets every label
+   and lock, so any path that redraws the title (toMenu included) agrees */
+function refreshMode() { applySeed(previewSeed()); }
+function showCupInfo() {
+  const cup = mode === 'cup', live = cup && Cup.active && !Cup.done;
+  $('seedlbl').textContent = cup ? 'Cup' : 'Circuit';
+  seedIn.disabled = live; $('reroll').disabled = live;
+  if (live) {                                    // a running cup owns the seed and the difficulty
+    seedIn.value = Cup.data.seed;
+    diff = Cup.data.diff;
+    document.querySelectorAll('#diff .dbtn').forEach(b => b.classList.toggle('sel', +b.dataset.d === diff));
+  }
+  $('diff').classList.toggle('locked', live);
+  $('abandon').classList.toggle('hide', !live);
+  $('go').textContent = !cup ? 'START ENGINE' : live ? `CONTINUE · ROUND ${Cup.data.round + 1}` : 'START CUP';
+  const box = $('cupinfo');
+  box.classList.toggle('hide', !cup);
+  if (!cup) return;
+  const seed = Cup.active ? Cup.data.seed : cleanSeed(seedIn.value);
+  const round = Cup.active ? Cup.data.round : 0;
+  const list = Cup.rounds(seed).map((r, i) =>
+    `<span class="r${i < round ? ' done' : i === round ? ' now' : ''}">${r}</span>`).join(' → ');
+  let head = `<b>${CUP_ROUNDS} ROUNDS</b> · ${CUP_POINTS.join(' / ')} PTS`;
+  if (Cup.active && !Cup.done) {
+    const st = Cup.standings(), me = st.findIndex(r => r.car === player), lead = st[0];
+    head = `<b>CUP ${seed}</b> · ROUND ${round + 1} OF ${CUP_ROUNDS} · YOU ${ORD[me]}${SUF[me]} ON <b>${st[me].points}</b> PTS` +
+           (lead.car !== player ? ` · ${lead.car.name} LEADS <b>${lead.points}</b>` : ' · YOU LEAD');
+  }
+  box.innerHTML = `${head}<br>${list}`;
+}
+document.querySelectorAll('.mbtn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.m)));
+
+/* Walking away from a half-run cup is not undoable either: two presses. */
+let abandonArmedAt = 0;
+$('abandon').addEventListener('click', () => {
+  const ab = $('abandon'), now = Date.now();
+  if (now - abandonArmedAt > 3000) {
+    abandonArmedAt = now;
+    ab.textContent = 'FORFEIT?'; ab.classList.add('arm');
+    setTimeout(() => {
+      if (Date.now() - abandonArmedAt >= 3000) { ab.textContent = 'ABANDON CUP'; ab.classList.remove('arm'); }
+    }, 3050);
+    return;
+  }
+  const seed = Cup.data.seed;
+  Cup.abandon(); abandonArmedAt = 0;
+  ab.textContent = 'ABANDON CUP'; ab.classList.remove('arm');
+  refreshMode();
+  toast('CUP ABANDONED — ' + seed, 1600, '#ff3ea5');
+});
+
 document.querySelectorAll('.tbtn').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('.tbtn').forEach(x => x.classList.remove('sel'));
   b.classList.add('sel');
   timeChoice = +b.dataset.t;
-  applySeed(seedIn.value);                       // relight; geometry is unchanged
+  applySeed(previewSeed());                      // relight; geometry is unchanged
 }));
 
-seedIn.addEventListener('change', () => applySeed(seedIn.value));
+seedIn.addEventListener('change', () => applySeed(previewSeed()));
 seedIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.stopPropagation(); seedIn.blur(); } });
 $('ghosttoggle').addEventListener('click', () => {
   Ghost.enabled = !Ghost.enabled;
@@ -3206,10 +3300,17 @@ $('clearrec').addEventListener('click', () => {
 });
 $('reroll').addEventListener('click', () => {
   let s = '';
-  for (let i = 0; i < 5; i++) s += 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[(Math.random() * 32) | 0];
-  applySeed(s);
+  for (let i = 0; i < 5; i++) s += CUP_ALPHABET[(Math.random() * 32) | 0];
+  seedIn.value = s;
+  applySeed(previewSeed());
 });
-$('go').addEventListener('click', () => Game.begin());
+$('go').addEventListener('click', () => {
+  if (mode === 'cup') {
+    if (!Cup.active || Cup.done) Cup.start(seedIn.value, diff);
+    applySeed(Cup.currentSeed());
+  }
+  Game.begin();
+});
 $('again').addEventListener('click', () => Game.restart());
 $('resume').addEventListener('click', () => Game.togglePause());
 $('quit').addEventListener('click', () => { $('pause').classList.add('hide'); Game.restart(); });
@@ -3218,7 +3319,12 @@ $('tomenu2').addEventListener('click', () => Game.toMenu());
 
 // Everything exists now, so candidates can be driven before being accepted.
 simReady = true;
-applySeed(new URLSearchParams(location.search).get('seed') || 'ALPINE');
+{
+  const q = new URLSearchParams(location.search);
+  if (q.get('cup')) { seedIn.value = cleanSeed(q.get('cup')); setMode('cup'); }
+  else if (q.get('seed')) { seedIn.value = cleanSeed(q.get('seed')); setMode('race'); }
+  else setMode(Records.data.prefs.mode === 'cup' ? 'cup' : 'race');
+}
 renderer.render(scene, camera);
 
 requestAnimationFrame(() => {
