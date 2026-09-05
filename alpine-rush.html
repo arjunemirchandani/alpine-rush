@@ -262,7 +262,15 @@
   /* results */
   #rtitle{ font-size:min(62px,9vw); font-weight:800; letter-spacing:.06em; color:#fff; text-shadow:0 0 30px rgba(255,204,51,.55); }
   #rsub{ font-size:12px; letter-spacing:.4em; color:var(--am); margin-top:6px; }
-  #rgrid{ margin:26px auto 4px; width:100%; max-width:470px; }
+  #rbody{ display:flex; justify-content:center; align-items:flex-start; gap:22px; flex-wrap:wrap; margin:26px auto 4px; }
+  #rgrid{ flex:1 1 280px; max-width:470px; }
+  #rmap{ flex:none; width:176px; }
+  #rmap.hide{ display:none; }
+  #lapmap{ display:block; width:100%; height:auto; }
+  #rmaplbl{ margin-top:4px; font-size:9.5px; letter-spacing:.16em; line-height:1.8; color:rgba(223,246,255,.45); }
+  #rmaplbl i{ display:inline-block; width:14px; height:3px; margin-right:6px; vertical-align:middle; }
+  #rmaplbl .gn{ background:var(--gn); box-shadow:0 0 6px var(--gn); }
+  #rmaplbl .mg{ background:var(--mg); box-shadow:0 0 6px var(--mg); }
   .rrow{ display:flex; align-items:center; gap:10px; padding:9px 12px; font-size:13px; border-bottom:1px solid rgba(53,230,255,.13); }
   .rrow.me{ background:rgba(53,230,255,.09); border-left:2px solid var(--cy); }
   .rrow .p{ width:34px; font-weight:800; color:var(--am); }
@@ -427,7 +435,13 @@
   <div class="card panel">
     <div id="rtitle">FINISH</div>
     <div id="rsub">RACE COMPLETE</div>
-    <div id="rgrid"></div>
+    <div id="rbody">
+      <div id="rgrid"></div>
+      <div id="rmap" class="hide">
+        <canvas id="lapmap" width="320" height="320"></canvas>
+        <div id="rmaplbl">LAST LAP VS RECORD<br><i class="gn"></i>GAINED &nbsp; <i class="mg"></i>LOST</div>
+      </div>
+    </div>
     <div id="rnote"></div>
     <div id="rstats">
       <div><div class="lbl">Best Lap</div><div class="v" id="rbest">--</div></div>
@@ -2516,14 +2530,17 @@ function segColor(h, gain) {
   }
   return { css: `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`, w };
 }
-function drawMap() {
-  const g = mapCtx; g.clearRect(0, 0, 320, 320);
+function drawMap() { paintMap(mapCtx, LapTrace.cur, true); }
+/* live: the HUD map, with the progress halo, ghost and cars. Otherwise just
+   the circuit and a heat trace, which is what the results card wants. */
+function paintMap(g, heat, live) {
+  g.clearRect(0, 0, 320, 320);
   g.lineJoin = g.lineCap = 'round';
   g.strokeStyle = 'rgba(53,230,255,.22)'; g.lineWidth = 17;
   g.beginPath(); MAPPTS.forEach((p, i) => i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])); g.closePath(); g.stroke();
   // the stretch of this lap already driven glows brighter, so the map doubles
   // as a distance-to-line gauge; it resets at the line with the lap counter
-  if (Game.state === 'race' && !player.finished) {
+  if (live && Game.state === 'race' && !player.finished) {
     g.strokeStyle = 'rgba(53,230,255,.5)';
     g.beginPath(); g.moveTo(MAPPTS[0][0], MAPPTS[0][1]);
     for (let i = 1; i < MAPPTS.length && CUM[i * 8] <= player.s; i++) g.lineTo(MAPPTS[i][0], MAPPTS[i][1]);
@@ -2533,7 +2550,6 @@ function drawMap() {
   // the core line is stroked one segment at a time so its colour can follow
   // the height of the road, and this lap's heat trace against the ghost:
   // green where the stretch gained time on the record, magenta where it lost
-  const heat = LapTrace.cur;
   for (let i = 1; i <= MAPPTS.length; i++) {              // <= : the last segment closes the loop
     const a = MAPPTS[i - 1], b = MAPPTS[i % MAPPTS.length];
     const c = segColor((a.h + b.h) * 0.5, heat ? heat[i - 1] : NaN);
@@ -2542,6 +2558,7 @@ function drawMap() {
   }
   const sl = MAPPTS.to(PX[0], PZ[0]);
   g.fillStyle = '#ffcc33'; g.fillRect(sl[0] - 5, sl[1] - 5, 10, 10);
+  if (!live) return;
   // the record ghost is what VS RECORD measures against, so it belongs on the
   // map too: a hollow dashed ring, under the cars so the player stays on top
   if (Ghost.mesh && Ghost.mesh.visible) {
@@ -2777,6 +2794,11 @@ const Game = {
     } else { $('rbest').style.color = ''; $('rbest').style.textShadow = ''; }
     $('rtotal').textContent = fmt(card.total);
     $('rscore').textContent = card.score.toLocaleString();
+    // where the final lap gained and lost against the record, large enough to
+    // read; hidden when no ghost ran (no record, ghost off, autopilot)
+    const trace = LapTrace.last, drove = !!trace && trace.some(v => v === v);
+    $('rmap').classList.toggle('hide', !drove);
+    if (drove) paintMap($('lapmap').getContext('2d'), trace, false);
     player.view.visible = true;                 // updateCamera stops running once we leave the race
     $('results').classList.remove('hide');
     el.hud.classList.remove('on');
