@@ -979,16 +979,17 @@ function applyTimeOfDay(i) {
    fogK scales the hour's fog distances (WHITEOUT sets its own), sunK/hemiK
    flatten the light, flakes is how many of the snowfall points fly and wind
    is their sideways drift in m/s. grip and gust are read by the physics,
-   howl is the wind loop's floor gain, and flakes also sets the slush spray. ---- */
+   howl is the wind loop's floor gain, flakes also sets the slush spray, and
+   box is the side of the cloud around the camera: smaller packs it denser. ---- */
 const WEATHER = [
   { name: 'CLEAR',    p: 0.36, fogK: 1.00, sunK: 1.00, hemiK: 1.00, skyTint: 0xffffff, road: 0xffffff,
-    flakes: 0,    flake: 0.42, fall: 1.0, wind: 0,  grip: 1.00, gust: 0,   howl: 0 },
+    flakes: 0,    flake: 0.42, flakeColor: 0xffffff, flakeAlpha: 0.62, box: 260, fall: 1.0, wind: 0,  grip: 1.00, gust: 0,   howl: 0 },
   { name: 'SNOW',     p: 0.34, fogK: 0.80, sunK: 0.86, hemiK: 1.05, skyTint: 0xf2f4f6, road: 0xf4f5f7,
-    flakes: 700,  flake: 0.42, fall: 1.0, wind: 3,  grip: 0.94, gust: 0,   howl: 0.015 },
-  { name: 'BLIZZARD', p: 0.15, fogK: 0.36, sunK: 0.45, hemiK: 1.25, skyTint: 0xd6dbe2, road: 0xc9cdd4,
-    flakes: 2000, flake: 0.62, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2, howl: 0.085 },
+    flakes: 700,  flake: 0.46, flakeColor: 0xe6edf6, flakeAlpha: 0.78, box: 260, fall: 1.0, wind: 3,  grip: 0.94, gust: 0,   howl: 0.015 },
+  { name: 'BLIZZARD', p: 0.15, fogK: 0.28, sunK: 0.45, hemiK: 1.25, skyTint: 0xd6dbe2, road: 0xc9cdd4,
+    flakes: 2000, flake: 0.75, flakeColor: 0xbcc8d8, flakeAlpha: 0.92, box: 150, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2, howl: 0.085 },
   { name: 'WHITEOUT', p: 0.15, fogK: 0,    sunK: 0.35, hemiK: 1.30, skyTint: 0xdfe3e8, road: 0xffffff,
-    fogNear: 30, fogFar: 300, flakes: 0, flake: 0.42, fall: 1.0, wind: 0, grip: 0.97, gust: 0, howl: 0.012 }
+    fogNear: 30, fogFar: 300, flakes: 0, flake: 0.42, flakeColor: 0xffffff, flakeAlpha: 0.62, box: 260, fall: 1.0, wind: 0, grip: 0.97, gust: 0, howl: 0.012 }
 ];
 let WX = WEATHER[0];
 function applyWeather(i) {
@@ -1002,7 +1003,11 @@ function applyWeather(i) {
   scene.fog.color.setHex(TOD.fog).lerp(new THREE.Color(0xe9ecf0), 1 - WX.fogK * 0.85);
   skyDome.material.color.setHex(WX.skyTint);
   snowGeo.setDrawRange(0, WX.flakes);
+  // against the near-white sky a blizzard brings, pure white flakes vanish;
+  // real snow reads as grey specks on an overcast sky, so the heavier the
+  // weather, the greyer and more opaque the flake
   snowFall.material.size = WX.flake;
+  snowFall.material.color.setHex(WX.flakeColor); snowFall.material.opacity = WX.flakeAlpha;
   if (roadMesh) roadMesh.material.color.setHex(WX.road);
 }
 
@@ -3257,10 +3262,11 @@ function frame() {
       sp[k] += (Math.sin(Game.now * 0.6 + sPhase[i]) * 2.4 + WX.wind) * dt;
       // x/z are relative to the camera (snowFall follows it); a wind-blown flake
       // that leaves the box respawns upwind so the cloud does not thin out
-      if (sp[k + 1] < camera.position.y - 40 || Math.abs(sp[k]) > 150) {
+      const half = WX.box * 0.5;
+      if (sp[k + 1] < camera.position.y - 40 || Math.abs(sp[k]) > half + 20 || Math.abs(sp[k + 2]) > half + 20) {
         sp[k + 1] = camera.position.y + 55;
-        sp[k] = (Math.random() - 0.5) * 260 - Math.sign(WX.wind) * 40;
-        sp[k + 2] = (Math.random() - 0.5) * 260;
+        sp[k] = (Math.random() - 0.5) * WX.box - Math.sign(WX.wind) * half * 0.3;
+        sp[k + 2] = (Math.random() - 0.5) * WX.box;
       }
     }
     if (WX.flakes) snowGeo.attributes.position.needsUpdate = true;
