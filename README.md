@@ -318,6 +318,31 @@ those figures were optimistic. Each rival draws a random wander phase per page l
 lap time by ~0.1–0.2 s, and on circuits where two tiers sit close together that is enough to flip
 the ordering. Any tier comparison has to average over several realisations to mean anything.
 
+### Weather
+
+Every seed also deals a condition, from its own stream and on top of the circuit — never part of
+it, so `JAKDA` is still `JAKDA` whatever the sky is doing:
+
+| | Sky | Falling | Handling |
+|---|---|---|---|
+| **CLEAR** (36%) | the hour as designed | nothing | dry |
+| **SNOW** (34%) | fog a little closer | light flurries | grip × 0.94 |
+| **BLIZZARD** (15%) | fog at 115 m, flat grey light, snow-dusted road | heavy, wind-driven snow; slush off the tyres | grip × 0.80, side-wind gusts |
+| **WHITEOUT** (15%) | 40 m of visibility and no sky | nothing — eerily quiet | grip × 0.97; the minimap earns its keep |
+
+The AI feels it too: its cornering plan scales by the same grip factor, so the pack slows in a
+blizzard instead of driving into the banks. Measured headlessly over six seeds at PRO, BLIZZARD costs
+the bots 4–7% a lap with no more off-track excursions than a dry day. WHITEOUT barely touches them —
+they see the curve — which makes it the one condition that is purely a test of *you*.
+
+Gusts are deterministic (two slow sines in time, phased per grid slot), so projected finishes and
+the drive test stay honest. Circuits are drive-tested **dry**: the weather is dealt on top of a track
+already known to work.
+
+The title screen can override the condition, like the hour. Racing in weather the seed didn't deal
+flags **WEATHER OVERRIDE · NO RECORDS** and that race can't set a best lap — otherwise a BLIZZARD
+seed's record could be set on a CLEAR day. Championship rounds always take their seed's weather.
+
 ### Time of day
 
 Each circuit is lit by its own hour — dawn, midday, golden hour or dusk — drawn from the seed, so
