@@ -235,6 +235,9 @@
   #timerow{ display:flex; gap:6px; justify-content:center; margin-top:9px; }
   .tbtn{ padding:7px 13px; font-size:10px; }
   #diff.locked .dbtn:not(.sel){ opacity:.3; pointer-events:none; }
+  #wxrow{ display:flex; gap:6px; justify-content:center; margin-top:6px; }
+  .wbtn{ padding:7px 11px; font-size:10px; }
+  #wxrow.locked .dbtn{ opacity:.3; pointer-events:none; }
   /* mode picker */
   #moderow{ display:flex; gap:9px; justify-content:center; margin-top:16px; }
   .mbtn{ padding:8px 18px; font-size:10.5px; }
@@ -430,6 +433,13 @@
       <button class="dbtn tbtn" data-t="1">DAY</button>
       <button class="dbtn tbtn" data-t="2">GOLDEN</button>
       <button class="dbtn tbtn" data-t="3">DUSK</button>
+    </div>
+    <div id="wxrow">
+      <button class="dbtn wbtn sel" data-w="-1">AUTO</button>
+      <button class="dbtn wbtn" data-w="0">CLEAR</button>
+      <button class="dbtn wbtn" data-w="1">SNOW</button>
+      <button class="dbtn wbtn" data-w="2">BLIZZARD</button>
+      <button class="dbtn wbtn" data-w="3">WHITEOUT</button>
     </div>
     <div id="moderow">
       <button class="dbtn mbtn sel" data-m="race">SINGLE RACE</button>
@@ -1320,10 +1330,14 @@ function buildScenery() {
 /* One call rebuilds the entire circuit from a seed string. */
 let trackInfo = null;
 let timeChoice = -1;                       // -1 = follow the seed
+let wxChoice = -1;                         // weather override; a cup always takes the seed's
+/* true when this race runs in weather the seed did not deal: no records then,
+   or a BLIZZARD seed's best lap could be set on a CLEAR day */
+function weatherOverridden() { return mode !== 'cup' && wxChoice >= 0 && wxChoice !== (TRACK.wx ?? 0); }
 function loadTrack(seedStr) {
   trackInfo = generateTrack(seedStr);
   applyTimeOfDay(timeChoice >= 0 ? timeChoice : (TRACK.time ?? 1));
-  applyWeather(TRACK.wx ?? 0);
+  applyWeather(mode !== 'cup' && wxChoice >= 0 ? wxChoice : (TRACK.wx ?? 0));
   trackInfo.time = TOD.name; trackInfo.weather = WX.name;
   clearWorld();
   buildTerrain();
@@ -2365,7 +2379,7 @@ const Ghost = {
 
   /* called with a completed lap time; keeps it if it beats the stored best */
   finishLap(lapMs) {
-    if (Game.testing || Game.autopilot || this.rec.length < 10) { this.startLap(); return false; }
+    if (Game.testing || Game.autopilot || weatherOverridden() || this.rec.length < 10) { this.startLap(); return false; }
     const improved = Records.submit(SEED, lapMs, this.pack(this.rec));
     if (improved) this.loadFor(SEED);
     this.startLap();
@@ -3290,7 +3304,8 @@ function showTrackInfo() {
   trackInfoEl.innerHTML =
     `<b>${(t.length / 1000).toFixed(2)} KM</b> · <b>${t.corners}</b> CORNERS · ` +
     `TIGHTEST <b>${Math.round(t.minCornerRadius)}M</b> · <b>${Math.round(t.straightPct)}%</b> FLAT OUT · ` +
-    `${shape} · <b>${t.time}</b> · <b>${t.weather}</b>` + (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '') + drive;
+    `${shape} · <b>${t.time}</b> · <b>${t.weather}</b>` + (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '') + drive +
+    (weatherOverridden() ? ` · <span style="color:var(--am)">WEATHER OVERRIDE · NO RECORDS</span>` : '');
   if (mode === 'race') seedIn.value = t.seed;   // in cup mode the input holds the cup seed
   // the address bar shares what you'd want shared: the circuit, or the cup
   const u = new URL(location.href);
@@ -3342,6 +3357,7 @@ function showCupInfo() {
     document.querySelectorAll('#diff .dbtn').forEach(b => b.classList.toggle('sel', +b.dataset.d === diff));
   }
   $('diff').classList.toggle('locked', live);
+  $('wxrow').classList.toggle('locked', cup);
   $('abandon').classList.toggle('hide', !live);
   $('go').textContent = !cup ? 'START ENGINE' : live ? `CONTINUE · ROUND ${Cup.data.round + 1}` : 'START CUP';
   const box = $('cupinfo');
@@ -3380,6 +3396,12 @@ $('abandon').addEventListener('click', () => {
   toast('CUP ABANDONED — ' + seed, 1600, '#ff3ea5');
 });
 
+document.querySelectorAll('.wbtn').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.wbtn').forEach(x => x.classList.remove('sel'));
+  b.classList.add('sel');
+  wxChoice = +b.dataset.w;
+  applySeed(previewSeed());                      // re-dress; geometry is unchanged
+}));
 document.querySelectorAll('.tbtn').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('.tbtn').forEach(x => x.classList.remove('sel'));
   b.classList.add('sel');
@@ -3457,7 +3479,7 @@ requestAnimationFrame(() => {
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
                   driveTest, DRIVE, Records, Ghost, LapTrace, Cup,
-                  TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, sun, hemi, ambient, skyDome,
+                  TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
 </script>
 </body>
