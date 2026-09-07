@@ -328,7 +328,7 @@ it, so `JAKDA` is still `JAKDA` whatever the sky is doing:
 | **CLEAR** (36%) | the hour as designed | nothing | dry |
 | **SNOW** (34%) | fog a little closer | light flurries | grip × 0.94 |
 | **BLIZZARD** (15%) | fog at ~90 m, flat grey light, snow-dusted road | heavy, wind-driven snow; slush off the tyres | grip × 0.80, side-wind gusts |
-| **WHITEOUT** (15%) | 40 m of visibility and no sky | nothing — eerily quiet | grip × 0.97; the minimap earns its keep |
+| **WHITEOUT** (15%) | the horizon gone: slope and sky one grey beyond ~140 m | a fine spindrift blowing sideways | grip × 0.97; the minimap earns its keep |
 
 The AI feels it too: its cornering plan scales by the same grip factor, so the pack slows in a
 blizzard instead of driving into the banks. Measured headlessly over six seeds at PRO, BLIZZARD costs
