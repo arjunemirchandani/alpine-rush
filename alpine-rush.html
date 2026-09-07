@@ -978,16 +978,17 @@ function applyTimeOfDay(i) {
 /* ---- weather: dealt per seed on top of the hour, never part of the circuit.
    fogK scales the hour's fog distances (WHITEOUT sets its own), sunK/hemiK
    flatten the light, flakes is how many of the snowfall points fly and wind
-   is their sideways drift in m/s. grip and gust are read by the physics. ---- */
+   is their sideways drift in m/s. grip and gust are read by the physics,
+   howl is the wind loop's floor gain, and flakes also sets the slush spray. ---- */
 const WEATHER = [
   { name: 'CLEAR',    p: 0.36, fogK: 1.00, sunK: 1.00, hemiK: 1.00, skyTint: 0xffffff, road: 0xffffff,
-    flakes: 0,    flake: 0.42, fall: 1.0, wind: 0,  grip: 1.00, gust: 0 },
+    flakes: 0,    flake: 0.42, fall: 1.0, wind: 0,  grip: 1.00, gust: 0,   howl: 0 },
   { name: 'SNOW',     p: 0.34, fogK: 0.80, sunK: 0.86, hemiK: 1.05, skyTint: 0xf2f4f6, road: 0xf4f5f7,
-    flakes: 700,  flake: 0.42, fall: 1.0, wind: 3,  grip: 0.94, gust: 0 },
+    flakes: 700,  flake: 0.42, fall: 1.0, wind: 3,  grip: 0.94, gust: 0,   howl: 0.015 },
   { name: 'BLIZZARD', p: 0.15, fogK: 0.36, sunK: 0.45, hemiK: 1.25, skyTint: 0xd6dbe2, road: 0xc9cdd4,
-    flakes: 1100, flake: 0.55, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2 },
+    flakes: 1100, flake: 0.55, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2, howl: 0.085 },
   { name: 'WHITEOUT', p: 0.15, fogK: 0,    sunK: 0.35, hemiK: 1.30, skyTint: 0xdfe3e8, road: 0xffffff,
-    fogNear: 40, fogFar: 420, flakes: 0, flake: 0.42, fall: 1.0, wind: 0, grip: 0.97, gust: 0 }
+    fogNear: 40, fogFar: 420, flakes: 0, flake: 0.42, fall: 1.0, wind: 0, grip: 0.97, gust: 0, howl: 0.012 }
 ];
 let WX = WEATHER[0];
 function applyWeather(i) {
@@ -2202,6 +2203,17 @@ class Car {
     this.parts.blob.position.set(px, this.groundY + 0.06, pz);
     this.parts.blob.scale.setScalar(1);
 
+    // slush spray: snow on the road comes off the rear wheels at speed as a low
+    // white tail, a flicker in flurries and a rooster tail in a blizzard
+    const slush = WX.flakes && this.onTrack && this.speed > 16 ? WX.flakes / 1100 : 0;
+    if (slush && Math.random() < slush * 0.9) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const wx = px + cy * side * 1.0 - sy * 1.4, wz = pz - sy * side * 1.0 - cy * 1.4;
+      emit(wx, this.groundY + 0.2, wz,
+        (Math.random() - 0.5) * 2 - this.vx * 0.12, 0.6 + Math.random() * 1.2, (Math.random() - 0.5) * 2 - this.vz * 0.12,
+        0.7 + slush * 0.6, 0.35 + slush * 0.25, 0.94, 0.96, 1);
+    }
+
     // tyre smoke + skid marks
     const slipping = (this.drifting && this.speed > 14) || (!this.onTrack && this.speed > 10);
     if (slipping) {
@@ -3265,7 +3277,10 @@ function frame() {
       const slip = clamp((Math.abs(player.drift) - 0.12) * 2.4, 0, 1) * clamp(player.speed / 22, 0, 1);
       Sfx.set(Sfx.screech, player.onTrack ? slip * 0.16 : 0, 1250 + slip * 900);
       Sfx.set(Sfx.rumble, player.onTrack ? 0 : clamp(player.speed / 40, 0, 1) * 0.2);
-      Sfx.set(Sfx.wind, clamp(player.speed / TOP_SPEED, 0, 1) * 0.07);
+      // the weather's howl sits under the speed wind and gusts on the same
+      // slow sines the physics leans on the car with
+      const howl = WX.howl * (0.75 + 0.25 * Math.sin(Game.now * 0.55) * Math.sin(Game.now * 1.9 + 1));
+      Sfx.set(Sfx.wind, clamp(player.speed / TOP_SPEED, 0, 1) * 0.07 + howl, WX.howl ? 380 : 520);
       Sfx.set(Sfx.tow, (player.tow || 0) * 0.085, 320 + (player.tow || 0) * 680);
     }
   }
