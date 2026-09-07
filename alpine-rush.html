@@ -985,7 +985,7 @@ const WEATHER = [
   { name: 'SNOW',     p: 0.34, fogK: 0.80, sunK: 0.86, hemiK: 1.05, skyTint: 0xf2f4f6, road: 0xf4f5f7,
     flakes: 700,  flake: 0.42, fall: 1.0, wind: 3,  grip: 0.94, gust: 0 },
   { name: 'BLIZZARD', p: 0.15, fogK: 0.36, sunK: 0.45, hemiK: 1.25, skyTint: 0xd6dbe2, road: 0xc9cdd4,
-    flakes: 1100, flake: 0.55, fall: 2.2, wind: 22, grip: 0.82, gust: 3.2 },
+    flakes: 1100, flake: 0.55, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2 },
   { name: 'WHITEOUT', p: 0.15, fogK: 0,    sunK: 0.35, hemiK: 1.30, skyTint: 0xdfe3e8, road: 0xffffff,
     fogNear: 40, fogFar: 420, flakes: 0, flake: 0.42, fall: 1.0, wind: 0, grip: 0.97, gust: 0 }
 ];
@@ -1848,6 +1848,7 @@ class Car {
   }
 
   placeOnGrid(slot) {
+    this.gridSlot = slot;
     const s = 16 + slot * 13;
     const a = atDist(s);
     const side = slot % 2 ? 1 : -1;
@@ -1937,8 +1938,14 @@ class Car {
     vL *= Math.exp(-(onTrack ? 0.11 : 1.35) * dt);          // roll + snow drag
     vL -= Math.sign(vL) * 0.0011 * vL * vL * (1 - TOW.drag * tow) * dt;  // aero, thinned by the tow
 
+    // ---- weather: a side wind leans on the car. Deterministic in time and
+    // per grid slot, never random, so the projected finishes stay honest.
+    if (WX.gust && running) {
+      const ph = (this.gridSlot || 0) * 1.9, t = Game.now;
+      vT += WX.gust * (Math.sin(t * 0.55 + ph) * 0.6 + Math.sin(t * 1.9 + ph * 1.7) * 0.4) * dt;
+    }
     // ---- lateral grip: the whole drift model lives here
-    let grip = onTrack ? 5.4 : 2.1;
+    let grip = (onTrack ? 5.4 : 2.1) * WX.grip;
     if (c.hand && running) grip *= 0.15;
     else if (c.brake > 0.4 && Math.abs(vL) > 24) grip *= 0.62;   // trail-braking rotation
     if (wantBoost) grip *= 0.9;
@@ -2112,7 +2119,7 @@ class Car {
     // Planning above ~26 means demanding grip that mostly is not there, so the
     // car runs wide and loses more than the ambition gains. Ceiling ~25.5 for
     // the best drivers; their edge comes from line-holding and top speed.
-    const latGrip = 17.5 + this.skill * 8;
+    const latGrip = (17.5 + this.skill * 8) * WX.grip;     // less to lean on in the snow
     let vT = Math.sqrt(latGrip / k);
     // already wide? recover first. Without this, a high-skill driver plans an
     // ambitious corner speed, runs wide, and plans the next one just as fast —
@@ -3147,6 +3154,7 @@ function driveTest() {
 
   return {
     offPct: +offPct.toFixed(2), respawns, slowest: +Math.min(...advanced).toFixed(2),
+    advanced: advanced.map(a => +a.toFixed(3)),          // laps per car, for balance sweeps
     ok: offPct <= DRIVE.maxOffPct && respawns === 0 && !stalled
   };
 }
