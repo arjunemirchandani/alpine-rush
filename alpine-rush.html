@@ -584,7 +584,7 @@ const CLASSIC = {
   rad: [[3, 62, 0.6], [5, 28, 2.1], [2, 34, -0.9]],           // [mode, amplitude, phase]
   elev: [[2, 14, 0.4], [3, 8, -1.2], [5, 3.5, 0.3]],
   noise: [0, 0],                                               // mountain-range offset
-  time: 1                                                      // the original races at midday
+  time: 1, wx: 1                                               // the original: midday, light snow
 };
 let TRACK = CLASSIC, SEED = 'ALPINE';
 let simReady = false;              // flipped once cars and the sim loop exist
@@ -751,9 +751,13 @@ function generateTrack(seedStr) {
   const hourRnd = mulberry32(strSeed(SEED + '#H'));
   hourRnd(); hourRnd(); hourRnd();          // discard: mulberry32's first outputs track the seed
   const hour = (hourRnd() * 4) | 0;
+  const wxRnd = mulberry32(strSeed(SEED + '#W'));
+  wxRnd(); wxRnd(); wxRnd();
+  let wx = 0, u = wxRnd();                  // weighted by WEATHER[].p
+  for (let k = 0; k < WEATHER.length - 1 && u >= WEATHER[k].p; k++) { u -= WEATHER[k].p; wx = k + 1; }
   for (let attempt = 1; attempt <= 60; attempt++) {
     TRACK = drawParams(rnd);
-    TRACK.time = hour;
+    TRACK.time = hour; TRACK.wx = wx;
     buildCentreline();
     const m = measureTrack();
     if (!isDrivable(m)) continue;               // geometrically illegal, cheap to reject
@@ -961,6 +965,36 @@ function applyTimeOfDay(i) {
   skyDome.material.needsUpdate = true;
 }
 
+/* ---- weather: dealt per seed on top of the hour, never part of the circuit.
+   fogK scales the hour's fog distances (WHITEOUT sets its own), sunK/hemiK
+   flatten the light, flakes is how many of the snowfall points fly and wind
+   is their sideways drift in m/s. grip and gust are read by the physics. ---- */
+const WEATHER = [
+  { name: 'CLEAR',    p: 0.36, fogK: 1.00, sunK: 1.00, hemiK: 1.00, skyTint: 0xffffff, road: 0xffffff,
+    flakes: 0,    flake: 0.42, fall: 1.0, wind: 0,  grip: 1.00, gust: 0 },
+  { name: 'SNOW',     p: 0.34, fogK: 0.80, sunK: 0.86, hemiK: 1.05, skyTint: 0xf2f4f6, road: 0xf4f5f7,
+    flakes: 700,  flake: 0.42, fall: 1.0, wind: 3,  grip: 0.94, gust: 0 },
+  { name: 'BLIZZARD', p: 0.15, fogK: 0.36, sunK: 0.45, hemiK: 1.25, skyTint: 0xd6dbe2, road: 0xc9cdd4,
+    flakes: 1100, flake: 0.55, fall: 2.2, wind: 22, grip: 0.82, gust: 3.2 },
+  { name: 'WHITEOUT', p: 0.15, fogK: 0,    sunK: 0.35, hemiK: 1.30, skyTint: 0xdfe3e8, road: 0xffffff,
+    fogNear: 40, fogFar: 420, flakes: 0, flake: 0.42, fall: 1.0, wind: 0, grip: 0.97, gust: 0 }
+];
+let WX = WEATHER[0];
+function applyWeather(i) {
+  WX = WEATHER[clamp(i | 0, 0, WEATHER.length - 1)];
+  // the hour sets the base; the weather scales it, so DUSK in a blizzard is
+  // still recognisably dusk, just less of it
+  sun.intensity = TOD.sunI * WX.sunK;
+  hemi.intensity = TOD.hemiI * WX.hemiK;
+  if (WX.fogK > 0) { scene.fog.near = TOD.fogNear * WX.fogK; scene.fog.far = TOD.fogFar * WX.fogK; }
+  else { scene.fog.near = WX.fogNear; scene.fog.far = WX.fogFar; }
+  scene.fog.color.setHex(TOD.fog).lerp(new THREE.Color(0xe9ecf0), 1 - WX.fogK * 0.85);
+  skyDome.material.color.setHex(WX.skyTint);
+  snowGeo.setDrawRange(0, WX.flakes);
+  snowFall.material.size = WX.flake;
+  if (roadMesh) roadMesh.material.color.setHex(WX.road);
+}
+
 /* ---------------------------- 6. textures ------------------------------ */
 function canvasTex(w, h, draw, rx = 1, ry = 1) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
@@ -1139,14 +1173,16 @@ function ribbon(inner, outer, yOff, closed = true) {
   return g;
 }
 
+let roadMesh = null;
 function buildRoad() {
-  // tarmac
+  // tarmac; the material colour is the weather's to tint (snow-dusted in a blizzard)
   const road = new THREE.Mesh(
     ribbon(() => -HALF_W, () => HALF_W, () => 0.02),
-    new THREE.MeshLambertMaterial({ map: asphaltTex })
+    new THREE.MeshLambertMaterial({ map: asphaltTex, color: WX.road })
   );
   road.receiveShadow = true;
   world.add(road);
+  roadMesh = road;
 
   // white edge lines
   const lineMat = new THREE.MeshBasicMaterial({ color: 0xf3f7ff });
@@ -1287,7 +1323,8 @@ let timeChoice = -1;                       // -1 = follow the seed
 function loadTrack(seedStr) {
   trackInfo = generateTrack(seedStr);
   applyTimeOfDay(timeChoice >= 0 ? timeChoice : (TRACK.time ?? 1));
-  trackInfo.time = TOD.name;
+  applyWeather(TRACK.wx ?? 0);
+  trackInfo.time = TOD.name; trackInfo.weather = WX.name;
   clearWorld();
   buildTerrain();
   buildRoad();
@@ -3180,16 +3217,19 @@ function frame() {
 
     // ambient snow drift
     const sp = snowGeo.attributes.position.array;
-    for (let i = 0; i < SNOW_N; i++) {
+    for (let i = 0; i < WX.flakes; i++) {
       const k = i * 3;
-      sp[k + 1] -= (4 + (i % 7)) * dt;
-      sp[k] += Math.sin(Game.now * 0.6 + sPhase[i]) * dt * 2.4;
-      if (sp[k + 1] < camera.position.y - 40) {
+      sp[k + 1] -= (4 + (i % 7)) * WX.fall * dt;
+      sp[k] += (Math.sin(Game.now * 0.6 + sPhase[i]) * 2.4 + WX.wind) * dt;
+      // x/z are relative to the camera (snowFall follows it); a wind-blown flake
+      // that leaves the box respawns upwind so the cloud does not thin out
+      if (sp[k + 1] < camera.position.y - 40 || Math.abs(sp[k]) > 150) {
         sp[k + 1] = camera.position.y + 55;
-        sp[k] = (Math.random() - 0.5) * 260; sp[k + 2] = (Math.random() - 0.5) * 260;
+        sp[k] = (Math.random() - 0.5) * 260 - Math.sign(WX.wind) * 40;
+        sp[k + 2] = (Math.random() - 0.5) * 260;
       }
     }
-    snowGeo.attributes.position.needsUpdate = true;
+    if (WX.flakes) snowGeo.attributes.position.needsUpdate = true;
 
     if (player.boostStarted) { player.boostStarted = false; Sfx.boost(); }
     if (player.boostDenied > 0.4) Sfx.burst(0.09, 0.05, 'bandpass', 900, 380, 4);   // "no fuel" blip
@@ -3250,7 +3290,7 @@ function showTrackInfo() {
   trackInfoEl.innerHTML =
     `<b>${(t.length / 1000).toFixed(2)} KM</b> · <b>${t.corners}</b> CORNERS · ` +
     `TIGHTEST <b>${Math.round(t.minCornerRadius)}M</b> · <b>${Math.round(t.straightPct)}%</b> FLAT OUT · ` +
-    `${shape} · <b>${t.time}</b>` + (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '') + drive;
+    `${shape} · <b>${t.time}</b> · <b>${t.weather}</b>` + (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '') + drive;
   if (mode === 'race') seedIn.value = t.seed;   // in cup mode the input holds the cup seed
   // the address bar shares what you'd want shared: the circuit, or the cup
   const u = new URL(location.href);
@@ -3417,7 +3457,7 @@ requestAnimationFrame(() => {
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
                   driveTest, DRIVE, Records, Ghost, LapTrace, Cup,
-                  TIMES, applyTimeOfDay, sun, hemi, ambient, skyDome,
+                  TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
 </script>
 </body>
