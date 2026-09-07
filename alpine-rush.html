@@ -986,9 +986,9 @@ const WEATHER = [
   { name: 'SNOW',     p: 0.34, fogK: 0.80, sunK: 0.86, hemiK: 1.05, skyTint: 0xf2f4f6, road: 0xf4f5f7,
     flakes: 700,  flake: 0.42, fall: 1.0, wind: 3,  grip: 0.94, gust: 0,   howl: 0.015 },
   { name: 'BLIZZARD', p: 0.15, fogK: 0.36, sunK: 0.45, hemiK: 1.25, skyTint: 0xd6dbe2, road: 0xc9cdd4,
-    flakes: 1100, flake: 0.55, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2, howl: 0.085 },
+    flakes: 2000, flake: 0.62, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2, howl: 0.085 },
   { name: 'WHITEOUT', p: 0.15, fogK: 0,    sunK: 0.35, hemiK: 1.30, skyTint: 0xdfe3e8, road: 0xffffff,
-    fogNear: 40, fogFar: 420, flakes: 0, flake: 0.42, fall: 1.0, wind: 0, grip: 0.97, gust: 0, howl: 0.012 }
+    fogNear: 30, fogFar: 300, flakes: 0, flake: 0.42, fall: 1.0, wind: 0, grip: 0.97, gust: 0, howl: 0.012 }
 ];
 let WX = WEATHER[0];
 function applyWeather(i) {
@@ -1479,7 +1479,7 @@ function updateParticles(dt) {
 }
 
 /* ambient snowfall that follows the camera */
-const SNOW_N = 1100;
+const SNOW_N = 2000;
 const snowGeo = new THREE.BufferGeometry();
 const sPos = new Float32Array(SNOW_N * 3), sPhase = new Float32Array(SNOW_N);
 for (let i = 0; i < SNOW_N; i++) {
@@ -2205,13 +2205,13 @@ class Car {
 
     // slush spray: snow on the road comes off the rear wheels at speed as a low
     // white tail, a flicker in flurries and a rooster tail in a blizzard
-    const slush = WX.flakes && this.onTrack && this.speed > 16 ? WX.flakes / 1100 : 0;
-    if (slush && Math.random() < slush * 0.9) {
+    const slush = WX.flakes && this.onTrack && this.speed > 16 ? WX.flakes / SNOW_N : 0;
+    if (slush && Math.random() < slush * 28 * dt) {           // per second, not per frame
       const side = Math.random() < 0.5 ? -1 : 1;
       const wx = px + cy * side * 1.0 - sy * 1.4, wz = pz - sy * side * 1.0 - cy * 1.4;
       emit(wx, this.groundY + 0.2, wz,
         (Math.random() - 0.5) * 2 - this.vx * 0.12, 0.6 + Math.random() * 1.2, (Math.random() - 0.5) * 2 - this.vz * 0.12,
-        0.7 + slush * 0.6, 0.35 + slush * 0.25, 0.94, 0.96, 1);
+        0.55 + slush * 0.45, 0.3 + slush * 0.2, 0.94, 0.96, 1);
     }
 
     // tyre smoke + skid marks
