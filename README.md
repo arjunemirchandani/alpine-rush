@@ -327,7 +327,7 @@ it, so `JAKDA` is still `JAKDA` whatever the sky is doing:
 |---|---|---|---|
 | **CLEAR** (36%) | the hour as designed | nothing | dry |
 | **SNOW** (34%) | fog a little closer | light flurries | grip × 0.94 |
-| **BLIZZARD** (15%) | fog at 115 m, flat grey light, snow-dusted road | heavy, wind-driven snow; slush off the tyres | grip × 0.80, side-wind gusts |
+| **BLIZZARD** (15%) | fog at ~90 m, flat grey light, snow-dusted road | heavy, wind-driven snow; slush off the tyres | grip × 0.80, side-wind gusts |
 | **WHITEOUT** (15%) | 40 m of visibility and no sky | nothing — eerily quiet | grip × 0.97; the minimap earns its keep |
 
 The AI feels it too: its cornering plan scales by the same grip factor, so the pack slows in a
