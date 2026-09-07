@@ -970,10 +970,12 @@ function applyTimeOfDay(i) {
   ctx.fillStyle = g; ctx.fillRect(0, 0, 4, 256);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
-  if (skyDome.material.map) skyDome.material.map.dispose();   // canvas textures leak otherwise
+  if (skyTex) skyTex.dispose();                                // canvas textures leak otherwise
+  skyTex = tex;
   skyDome.material.map = tex;
   skyDome.material.needsUpdate = true;
 }
+let skyTex = null;
 
 /* ---- weather: dealt per seed on top of the hour, never part of the circuit.
    fogK scales the hour's fog distances (WHITEOUT sets its own), sunK/hemiK
@@ -988,8 +990,11 @@ const WEATHER = [
     flakes: 700,  flake: 0.46, flakeColor: 0xe6edf6, flakeAlpha: 0.78, box: 260, fall: 1.0, wind: 3,  grip: 0.94, gust: 0,   howl: 0.015 },
   { name: 'BLIZZARD', p: 0.15, fogK: 0.28, sunK: 0.45, hemiK: 1.25, skyTint: 0xd6dbe2, road: 0xc9cdd4,
     flakes: 2000, flake: 0.75, flakeColor: 0xbcc8d8, flakeAlpha: 0.92, box: 150, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2, howl: 0.085 },
-  { name: 'WHITEOUT', p: 0.15, fogK: 0,    sunK: 0.35, hemiK: 1.30, skyTint: 0xdfe3e8, road: 0xffffff,
-    fogNear: 30, fogFar: 300, flakes: 0, flake: 0.42, flakeColor: 0xffffff, flakeAlpha: 0.62, box: 260, fall: 1.0, wind: 0, grip: 0.97, gust: 0, howl: 0.012 }
+  // WHITEOUT erases the horizon: fog in to 140 m, coloured exactly like a sky
+  // dome with its gradient dropped (flatSky), so slope and sky are one grey and
+  // no silhouette survives; a spindrift of fine flakes blows through the murk
+  { name: 'WHITEOUT', p: 0.15, fogK: 0,    sunK: 0.35, hemiK: 1.30, skyTint: 0xe9ecf0, road: 0xffffff, flatSky: true,
+    fogNear: 10, fogFar: 140, flakes: 500, flake: 0.32, flakeColor: 0xc4cdd8, flakeAlpha: 0.7, box: 120, fall: 0.5, wind: 14, grip: 0.97, gust: 0, howl: 0.012 }
 ];
 let WX = WEATHER[0];
 function applyWeather(i) {
@@ -1002,6 +1007,8 @@ function applyWeather(i) {
   else { scene.fog.near = WX.fogNear; scene.fog.far = WX.fogFar; }
   scene.fog.color.setHex(TOD.fog).lerp(new THREE.Color(0xe9ecf0), 1 - WX.fogK * 0.85);
   skyDome.material.color.setHex(WX.skyTint);
+  const map = WX.flatSky ? null : skyTex;                      // a whiteout has no sky, only fog
+  if (skyDome.material.map !== map) { skyDome.material.map = map; skyDome.material.needsUpdate = true; }
   snowGeo.setDrawRange(0, WX.flakes);
   // against the near-white sky a blizzard brings, pure white flakes vanish;
   // real snow reads as grey specks on an overcast sky, so the heavier the
