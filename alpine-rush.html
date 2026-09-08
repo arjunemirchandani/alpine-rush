@@ -1503,10 +1503,11 @@ function buildTerrain() {
 }
 
 /* ------------------------- 8. road + trimmings ------------------------- */
-function ribbon(inner, outer, yOff, closed = true) {
+function ribbon(inner, outer, yOff, closed = true, skip) {
   // inner/outer: fn(i) -> lateral offset ; yOff: fn(i, lateral) -> height above surface
+  // skip: fn(i) -> true to leave out the quad between samples i and i+1
   const cnt = N + 1, pos = new Float32Array(cnt * 2 * 3), uv = new Float32Array(cnt * 2 * 2);
-  const idx = new Uint32Array(N * 6);
+  const idx = [];
   for (let a = 0; a < cnt; a++) {
     const i = a % N;
     const li = inner(i), lo = outer(i);
@@ -1516,16 +1517,15 @@ function ribbon(inner, outer, yOff, closed = true) {
     const v = CUM[i] / 34;
     uv[a * 4] = 0; uv[a * 4 + 1] = v; uv[a * 4 + 2] = 1; uv[a * 4 + 3] = v;
   }
-  let o = 0;
   for (let a = 0; a < N; a++) {
+    if (skip && skip(a)) continue;
     const p = a * 2;
-    idx[o++] = p; idx[o++] = p + 2; idx[o++] = p + 1;
-    idx[o++] = p + 1; idx[o++] = p + 2; idx[o++] = p + 3;
+    idx.push(p, p + 2, p + 1, p + 1, p + 2, p + 3);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.setIndex(new THREE.BufferAttribute(Uint32Array.from(idx), 1));
   g.computeVertexNormals();
   return g;
 }
@@ -1547,17 +1547,30 @@ function buildRoad() {
   world.add(new THREE.Mesh(ribbon(() => -HALF_W + 0.15, () => -HALF_W + 0.75, () => 0.05), lineMat));
 
   // snow banks (three-row ribbon that melts into the terrain mesh)
-  // (collapsed to zero width through a tunnel or over a bridge: there the
-  // road has walls and air beside it, not snow)
+  // Absent through a tunnel or over a bridge - the road has walls and air
+  // beside it there, not snow - and they end square at the portal plane.
+  // Collapsing them to zero width instead turned the last quad into a sheet
+  // slanting from the mountainside down to the road's edge, back-face culled
+  // from the chase camera, so you looked straight through it (KXR69).
+  // The last quad reaches the portal plane itself: stopping one sample short
+  // left a 1.5 m gap over the terrain cut that a low camera saw the valley
+  // through.
+  // ribbon() winds its quads for inner < outer (as the road: -HALF_W to
+  // +HALF_W). The right-hand banks listed their edges from the road outward,
+  // the reverse lateral order, so every one of their triangles faced down
+  // and was culled from above - unseen for as long as the terrain under them
+  // was the same snow, seen the moment the terrain cut before a portal
+  // removed it (KXR69: you looked through the verge into the valley).
   const snowMat = new THREE.MeshLambertMaterial({ color: 0xeef5ff });
+  const gap = i => FEAT[i] && FEAT[(i + 1) % N];
+  const band = (a, b) => [() => Math.min(a, b), () => Math.max(a, b)];
   for (const side of [1, -1]) {
-    const edge = i => side * HALF_W;
     world.add(new THREE.Mesh(
-      ribbon(edge, i => FEAT[i] ? edge(i) : side * (HALF_W + 9), (i, l) => bankProfile(Math.abs(l) - HALF_W) + 0.04),
+      ribbon(...band(side * HALF_W, side * (HALF_W + 9)), (i, l) => bankProfile(Math.abs(l) - HALF_W) + 0.04, true, gap),
       snowMat));
     world.add(new THREE.Mesh(
-      ribbon(i => FEAT[i] ? edge(i) : side * (HALF_W + 9), i => FEAT[i] ? edge(i) : side * (HALF_W + 25),
-        (i, l) => FEAT[i] ? 0.04 : terrainAt(PX[i] + RX[i] * l, PZ[i] + RZ[i] * l, i) - PY[i] + 0.22),
+      ribbon(...band(side * (HALF_W + 9), side * (HALF_W + 25)),
+        (i, l) => terrainAt(PX[i] + RX[i] * l, PZ[i] + RZ[i] * l, i) - PY[i] + 0.22, true, gap),
       snowMat));
   }
 }
@@ -1764,7 +1777,7 @@ function buildTunnels() {
   const shellMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   const innerMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
   const floorMat = new THREE.MeshBasicMaterial({ map: asphaltTex, vertexColors: true });
-  const lineMat = new THREE.MeshBasicMaterial({ color: 0xc9d2e0 });
+  const lineMat = new THREE.MeshBasicMaterial({ color: 0xc9d2e0, side: THREE.DoubleSide });   // the right-hand line lists its edges outward
   const lampMat = new THREE.MeshBasicMaterial({ color: 0xffe3b8 });
   const concrete = [0.42, 0.44, 0.48], warm = [1.0, 0.74, 0.44], snow = [0.93, 0.95, 0.98], face = [0.55, 0.57, 0.61];
   const lampGeo = new THREE.BoxGeometry(1.6, 0.14, 0.4);
@@ -1821,8 +1834,9 @@ function buildTunnels() {
    piers down to the ravine floor wherever it has fallen far enough. */
 const DECK = { edge: 11.9, parapet: [11.45, 11.9, 0.9], girder: [1.4, 2.6, 7.5], rail: 1.85, postEvery: 3, pierEvery: 26, pierMin: 6 };
 function buildBridges() {
-  const concrete = new THREE.MeshLambertMaterial({ color: 0x9da3ab });
-  const steel = new THREE.MeshLambertMaterial({ color: 0x2b3139 });
+  // double-sided: the right-hand parapet and rail are mirrored profiles
+  const concrete = new THREE.MeshLambertMaterial({ color: 0x9da3ab, side: THREE.DoubleSide });
+  const steel = new THREE.MeshLambertMaterial({ color: 0x2b3139, side: THREE.DoubleSide });
   const [g1, g2, gw] = DECK.girder, [pIn, pOut, pH] = DECK.parapet, E = DECK.edge;
   const deckProf = [[-HALF_W, 0.04], [-E, 0.04], [-E, -g1], [-gw, -g2], [gw, -g2], [E, -g1], [E, 0.04], [HALF_W, 0.04]];
   const postGeo = new THREE.BoxGeometry(0.1, DECK.rail - pH + 0.1, 0.1), pierGeo = new THREE.BoxGeometry(1, 1, 1);
