@@ -1394,6 +1394,88 @@ function loadTrack(seedStr) {
 // exist, because generateTrack() drive-tests candidates before accepting them.
 
 /* ---------------------------- 10. cars --------------------------------- */
+/* ---- lofted bodywork. A car is a run of cross-sections along its length,
+   each a rounded trapezoid (half width w at the sill, roofW at the shoulder,
+   floor yBot, shoulder yTop, corner radius r); consecutive sections are
+   stitched into one indexed shell so vertex normals average and the surface
+   shades smoothly, and the ends are capped with fans. Points on a section's
+   top edge are tagged so a second material (the roof on a glass cabin) can
+   take those faces. Still generated: no model file, no asset. ---- */
+const SECTION_K = 3;                                   // bezier samples per corner
+function roundedSection(st) {
+  const { w, roofW, yBot, yTop } = st;
+  const r = Math.min(st.r, w * 0.9, (yTop - yBot) * 0.45, roofW * 0.9);
+  const corners = [[-w, yBot], [w, yBot], [roofW, yTop], [-roofW, yTop]];   // anticlockwise from bottom-left
+  const pts = [];
+  for (let c = 0; c < 4; c++) {
+    const P = corners[c], A = corners[(c + 3) % 4], B = corners[(c + 1) % 4];
+    const ua = [A[0] - P[0], A[1] - P[1]], ub = [B[0] - P[0], B[1] - P[1]];
+    const la = Math.hypot(...ua) || 1, lb = Math.hypot(...ub) || 1;
+    const p0 = [P[0] + ua[0] / la * r, P[1] + ua[1] / la * r];
+    const p2 = [P[0] + ub[0] / lb * r, P[1] + ub[1] / lb * r];
+    for (let k = 0; k <= SECTION_K + 1; k++) {
+      const t = k / (SECTION_K + 1), u = 1 - t;
+      const x = u * u * p0[0] + 2 * u * t * P[0] + t * t * p2[0];
+      const y = u * u * p0[1] + 2 * u * t * P[1] + t * t * p2[1];
+      pts.push({ x, y, top: c >= 2 && y > yTop - r * 0.35 });
+    }
+  }
+  return pts;
+}
+function loft(sections, capEnds = true) {
+  const rings = sections.map(roundedSection), N = rings[0].length, S = rings.length;
+  const pos = [], idx = [], top = [];
+  rings.forEach((ring, si) => ring.forEach(p => pos.push(p.x, p.y, sections[si].z)));
+  for (let si = 0; si < S - 1; si++) for (let i = 0; i < N; i++) {
+    const j = (i + 1) % N, a = si * N + i, b = si * N + j, c = (si + 1) * N + i, d = (si + 1) * N + j;
+    const isTop = rings[si][i].top && rings[si][j].top;
+    (isTop ? top : idx).push(a, c, b, b, c, d);
+  }
+  if (capEnds) {
+    for (const [si, flip] of [[0, false], [S - 1, true]]) {
+      const ring = rings[si], cx = 0, cy = (sections[si].yBot + sections[si].yTop) * 0.5;
+      const centre = pos.length / 3; pos.push(cx, cy, sections[si].z);
+      for (let i = 0; i < N; i++) {
+        const a = si * N + i, b = si * N + (i + 1) % N;
+        idx.push(centre, flip ? b : a, flip ? a : b);
+      }
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex([...idx, ...top]);
+  geo.addGroup(0, idx.length, 0);
+  if (top.length) geo.addGroup(idx.length, top.length, 1);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/* the body: fenders swell at the axles (z 1.42 / -1.40), the sill sits at
+   0.34 so the wheels (0.44 radius, pivot 0.44) show, the shoulder rises from
+   nose to cowl and falls to the tail */
+const BODY = [
+  { z:  2.15, w: 0.56, roofW: 0.46, yBot: 0.42, yTop: 0.54, r: 0.06 },
+  { z:  1.98, w: 0.84, roofW: 0.72, yBot: 0.36, yTop: 0.66, r: 0.10 },
+  { z:  1.45, w: 0.99, roofW: 0.82, yBot: 0.34, yTop: 0.80, r: 0.15 },
+  { z:  0.85, w: 0.96, roofW: 0.80, yBot: 0.34, yTop: 0.87, r: 0.15 },
+  { z:  0.20, w: 0.96, roofW: 0.78, yBot: 0.34, yTop: 0.90, r: 0.15 },
+  { z: -0.70, w: 0.98, roofW: 0.80, yBot: 0.34, yTop: 0.90, r: 0.15 },
+  { z: -1.40, w: 1.03, roofW: 0.84, yBot: 0.34, yTop: 0.88, r: 0.17 },
+  { z: -1.96, w: 0.92, roofW: 0.78, yBot: 0.38, yTop: 0.84, r: 0.12 },
+  { z: -2.16, w: 0.70, roofW: 0.62, yBot: 0.46, yTop: 0.74, r: 0.08 }
+];
+/* the cabin: sits on the shoulder, windscreen raked, roof flat, rear glass
+   fast; its top-tagged faces are painted (group 1) */
+const CABIN = [
+  { z:  0.98, w: 0.72, roofW: 0.66, yBot: 0.84, yTop: 0.90, r: 0.04 },
+  { z:  0.50, w: 0.76, roofW: 0.64, yBot: 0.84, yTop: 1.12, r: 0.08 },
+  { z:  0.12, w: 0.78, roofW: 0.62, yBot: 0.84, yTop: 1.25, r: 0.10 },
+  { z: -0.72, w: 0.78, roofW: 0.62, yBot: 0.84, yTop: 1.25, r: 0.10 },
+  { z: -1.22, w: 0.74, roofW: 0.60, yBot: 0.84, yTop: 1.06, r: 0.08 },
+  { z: -1.56, w: 0.68, roofW: 0.58, yBot: 0.84, yTop: 0.88, r: 0.04 }
+];
+let bodyGeo = null, cabinGeo = null;                   // shared by every car
+
 function buildCar(color, accent) {
   const g = new THREE.Group();
   const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.34, metalness: 0.62 });
@@ -1406,25 +1488,25 @@ function buildCar(color, accent) {
     m.position.set(x, y, z); if (sx !== undefined) m.scale.set(sx, sy, sz);
     m.castShadow = true; g.add(m); return m;
   };
+  if (!bodyGeo) { bodyGeo = loft(BODY); cabinGeo = loft(CABIN); }
+  add(bodyGeo, paint, 0, 0, 0);                                 // the shell
+  add(cabinGeo, [glass, paint], 0, 0, 0);                       // greenhouse, painted roof
   const box = new THREE.BoxGeometry(1, 1, 1);
-  add(box, paint, 0, 0.60, 0.05, 1.92, 0.50, 4.25);            // main tub
-  add(box, paint, 0, 0.40, -1.05, 2.04, 0.30, 1.70);           // rear haunches
-  add(box, paint, 0, 0.36, 1.55, 1.72, 0.26, 1.05);            // nose
-  add(box, glass, 0, 0.98, -0.05, 1.62, 0.44, 1.85);           // greenhouse
-  add(box, paint, 0, 1.16, -0.55, 1.50, 0.14, 1.05);           // roof
-  add(box, trim,  0, 0.34, 2.06, 1.55, 0.16, 0.34);            // splitter
+  add(box, trim,  0, 0.36, 2.10, 1.50, 0.12, 0.30);            // splitter
   add(box, trim,  0, 1.28, -1.95, 1.86, 0.10, 0.52);           // wing plane
   add(box, dark, -0.72, 1.05, -1.90, 0.12, 0.42, 0.12);        // wing stays
   add(box, dark,  0.72, 1.05, -1.90, 0.12, 0.42, 0.12);
-  add(box, trim, -1.00, 0.52, 0.05, 0.10, 0.20, 3.10);         // side skirts
-  add(box, trim,  1.00, 0.52, 0.05, 0.10, 0.20, 3.10);
+  // wheel arches: a dark lip half-buried in the fender, so the wheel sits in
+  // a socket rather than against a flat side
+  const archGeo = new THREE.CylinderGeometry(0.56, 0.56, 0.08, 20); archGeo.rotateZ(Math.PI / 2);
+  for (const [x, z] of [[-0.97, 1.42], [0.97, 1.42], [-1.01, -1.40], [1.01, -1.40]]) add(archGeo, dark, x, 0.44, z);
 
   const head = new THREE.MeshBasicMaterial({ color: 0xfff4d0 });
-  add(box, head, -0.60, 0.55, 2.14, 0.46, 0.14, 0.06);
-  add(box, head,  0.60, 0.55, 2.14, 0.46, 0.14, 0.06);
+  add(box, head, -0.46, 0.56, 2.05, 0.34, 0.12, 0.06);
+  add(box, head,  0.46, 0.56, 2.05, 0.34, 0.12, 0.06);
   const brakeMat = new THREE.MeshBasicMaterial({ color: 0x330008 });
-  add(box, brakeMat, -0.62, 0.60, -2.10, 0.50, 0.16, 0.06);
-  add(box, brakeMat,  0.62, 0.60, -2.10, 0.50, 0.16, 0.06);
+  add(box, brakeMat, -0.46, 0.62, -2.12, 0.40, 0.14, 0.06);
+  add(box, brakeMat,  0.46, 0.62, -2.12, 0.40, 0.14, 0.06);
 
   // wheels
   const wgeo = new THREE.CylinderGeometry(0.44, 0.44, 0.34, 16);
@@ -2476,8 +2558,9 @@ const Ghost = {
     this.mesh = b.group;
     this.mesh.traverse(o => {
       if (!o.isMesh || !o.material) return;
-      o.material.transparent = true; o.material.opacity = 0.28;
-      o.material.depthWrite = false;
+      for (const m of [].concat(o.material)) {            // the cabin carries [glass, paint]
+        m.transparent = true; m.opacity = 0.28; m.depthWrite = false;
+      }
       o.castShadow = false; o.receiveShadow = false;
     });
     // The exhaust flames live at opacity 0 and are driven per-frame by the boost
