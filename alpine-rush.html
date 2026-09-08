@@ -206,6 +206,19 @@
   #summary{ margin-top:16px; font-size:10.5px; letter-spacing:.24em; color:rgba(223,246,255,.5); min-height:14px; }
   #summary b{ color:var(--am); font-weight:700; }
   #summary i{ font-style:normal; color:var(--gn); }
+  /* car picker: the pane opens a window onto the grid, where your car sits */
+  #carstage{ height:150px; }
+  #styles, #liveries{ display:flex; gap:7px; justify-content:center; flex-wrap:wrap; }
+  .sbtn{ padding:8px 16px; font-size:10px; letter-spacing:.2em; }
+  .lbtn{ width:30px; height:22px; padding:0; border:1px solid rgba(223,246,255,.25); cursor:pointer; pointer-events:auto;
+         clip-path:polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px); }
+  .lbtn.sel{ outline:2px solid #fff; outline-offset:2px; }
+  #carblurb{ min-height:12px; }
+  #title.showcase{ backdrop-filter:none; background:radial-gradient(ellipse at 50% 40%, rgba(9,20,38,.18), rgba(3,5,10,.62)); }
+  #title.showcase .card::after{ background:rgba(6,14,24,.22); }
+  #title.showcase .card::before{ background:rgba(53,230,255,.22); }
+  #title.showcase #panes{ border-color:rgba(53,230,255,.3); }
+  #title.showcase .rowlbl, #title.showcase #carblurb{ text-shadow:0 1px 6px rgba(0,0,0,.8); }
   .rowlbl{ font-size:9.5px; letter-spacing:.3em; color:rgba(223,246,255,.4); margin:14px 0 8px; }
   .rowlbl:first-child{ margin-top:0; }
   .rowlbl.dim{ color:rgba(223,246,255,.28); letter-spacing:.2em; margin-top:16px; }
@@ -508,7 +521,12 @@
         <div class="rowlbl dim">AUTO follows the circuit's seed · a cup always races its seed's conditions</div>
       </div>
       <div class="pane" data-pane="car">
-        <div class="rowlbl dim">Car selection is on its way</div>
+        <div id="carstage"></div>
+        <div class="rowlbl">Body</div>
+        <div id="styles"></div>
+        <div class="rowlbl">Livery</div>
+        <div id="liveries"></div>
+        <div id="carblurb" class="rowlbl dim"></div>
       </div>
       <div class="pane" data-pane="keys">
         <div class="keys">
@@ -1601,6 +1619,24 @@ const CABIN_MUSCLE = [
   { z: -1.45, w: 0.80, roofW: 0.64, yBot: 0.92, yTop: 1.12, r: 0.09 },
   { z: -1.75, w: 0.74, roofW: 0.60, yBot: 0.92, yTop: 0.96, r: 0.04 }
 ];
+/* the player's choice of car: a look, not a class. Every style shares the
+   physics, so records stay comparable whatever you drive. */
+const STYLE_INFO = {
+  gt:     { name: 'GT',     blurb: 'THE ORIGINAL · BALANCED SHOULDERS, HIGH WING' },
+  wedge:  { name: 'WEDGE',  blurb: 'LOW NOSE, BIG WING · VIPER\'S SHAPE' },
+  coupe:  { name: 'COUPE',  blurb: 'ROUNDED, TALL CABIN, DUCKTAIL · FROST\'S SHAPE' },
+  muscle: { name: 'MUSCLE', blurb: 'WIDE, LONG BONNET, SCOOP · KAIJU\'S SHAPE' }
+};
+const LIVERIES = [
+  { name: 'ICE',     color: 0x1fd3ff, accent: 0xffffff },
+  { name: 'AMBER',   color: 0xffb020, accent: 0x14161c },
+  { name: 'LIME',    color: 0x7dff4a, accent: 0x14161c },
+  { name: 'MAGENTA', color: 0xff3ea5, accent: 0xffffff },
+  { name: 'SUNSET',  color: 0xff6a3d, accent: 0xffffff },
+  { name: 'SLATE',   color: 0x4c5a6e, accent: 0x35e6ff },
+  { name: 'ONYX',    color: 0x14161c, accent: 0x35e6ff },
+  { name: 'PEARL',   color: 0xdfe6ee, accent: 0xff3ea5 }
+];
 /* wing: high (stays), big (wider, higher), lip (a ducktail), low (a wide
    blade). track: wheel x per axle. lights: [x, y, z] for the headlamps. */
 const STYLES = {
@@ -2185,6 +2221,20 @@ class Car {
     this.lapTimes = []; this.best = Infinity; this.lapStart = 0;
     this.wp = Math.random() * 6.28; this.wf = 0.31 + Math.random() * 0.22;
     this.driftHold = 0;
+  }
+
+  /* swap the bodywork for another style and livery, keeping the pose. The
+     merged geometries are this car's own and are freed; the lofts are shared. */
+  setLook(style, color, accent) {
+    scene.remove(this.view, this.parts.blob);
+    this.view.traverse(o => { if (o.isMesh) { o.geometry.dispose(); for (const m of [].concat(o.material)) { ENV_MATS.delete(m); m.dispose(); } } });
+    this.parts.blob.geometry.dispose(); this.parts.blob.material.dispose();
+    this.style = style; this.color = color; this.accent = accent;
+    const built = buildCar(color, accent, style);
+    this.view = built.group; this.parts = built;
+    scene.add(this.view, built.blob);
+    this.updateVisual(0.016, Game.now);
+    if (typeof standRows !== 'undefined') standRows[cars.indexOf(this)].children[1].style.color = '#' + color.toString(16).padStart(6, '0');
   }
 
   placeOnGrid(slot) {
@@ -3684,6 +3734,7 @@ function frame() {
     }
   }
 
+  if (showcase && Game.state === 'menu' && !$('title').classList.contains('hide')) showcaseCamera(dt);
   renderer.render(scene, camera);
 }
 renderer.setAnimationLoop(frame);
@@ -3819,10 +3870,52 @@ function showCupInfo() {
   const blurb = FEATURED[seed] ? `<div class="blurb">${FEATURED[seed]}</div>` : '';
   box.innerHTML = `${head}${blurb}${list}`;
 }
+/* ---- the car picker ---- */
+let look = Object.assign({ style: 'gt', livery: 0 }, Records.data.prefs.look || {});
+if (!STYLES[look.style]) look.style = 'gt';
+if (!LIVERIES[look.livery]) look.livery = 0;
+function applyLook(save = true) {
+  const L = LIVERIES[look.livery];
+  player.setLook(look.style, L.color, L.accent);
+  document.querySelectorAll('.sbtn').forEach(b => b.classList.toggle('sel', b.dataset.style === look.style));
+  document.querySelectorAll('.lbtn').forEach(b => b.classList.toggle('sel', +b.dataset.livery === look.livery));
+  $('carblurb').textContent = `${STYLE_INFO[look.style].blurb} · ${L.name}`;
+  if (save) Records.setPref('look', look);
+}
+$('styles').innerHTML = Object.keys(STYLES).map(k =>
+  `<button class="dbtn sbtn" data-style="${k}">${STYLE_INFO[k].name}</button>`).join('');
+$('liveries').innerHTML = LIVERIES.map((L, i) =>
+  `<button class="lbtn" data-livery="${i}" title="${L.name}" style="background:#${L.color.toString(16).padStart(6, '0')}"></button>`).join('');
+document.querySelectorAll('.sbtn').forEach(b => b.addEventListener('click', () => { look.style = b.dataset.style; applyLook(); }));
+document.querySelectorAll('.lbtn').forEach(b => b.addEventListener('click', () => { look.livery = +b.dataset.livery; applyLook(); }));
+// applied at startup, after the first circuit exists: setLook() poses the car on it
+
+/* on the CAR tab the card clears and the camera circles your car on the
+   grid, framed into the pane's window; any other tab restores the menu view */
+let showcase = false, showcaseAngle = 0.6;
+function menuCamera() {
+  camPos.set(player.pos.x - 18, player.pos.y + 9, player.pos.z - 22);
+  camLook.copy(player.pos);
+  camera.position.copy(camPos); camera.lookAt(camLook);
+}
+function showcaseCamera(dt) {
+  showcaseAngle += dt * 0.22;
+  const p = player.pos, r = 6.2;
+  camera.position.set(p.x + Math.sin(showcaseAngle) * r, p.y + 1.9, p.z + Math.cos(showcaseAngle) * r);
+  camera.lookAt(p.x, p.y + 0.15, p.z);
+  const T = TOD;                                              // a shadow under the car, not the grid box
+  sun.target.position.copy(p);
+  sun.position.set(p.x + T.off[0], p.y + T.off[1], p.z + T.off[2]);
+  sun.target.updateMatrixWorld();
+}
+
 /* ---- title tabs: one pane at a time, the last one remembered ---- */
 function setTab(name) {
   document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('sel', b.dataset.tab === name));
   document.querySelectorAll('#panes .pane').forEach(p => p.classList.toggle('sel', p.dataset.pane === name));
+  showcase = name === 'car';
+  $('title').classList.toggle('showcase', showcase);
+  if (!showcase && Game.state === 'menu') menuCamera();
   Records.setPref('tab', name);
 }
 document.querySelectorAll('#tabs .tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
@@ -3921,6 +4014,7 @@ simReady = true;
   if (q.get('cup')) { seedIn.value = cleanSeed(q.get('cup')); setMode('cup'); }
   else if (q.get('seed')) { seedIn.value = cleanSeed(q.get('seed')); setMode('race'); }
   else setMode(Records.data.prefs.mode === 'cup' ? 'cup' : 'race');
+  applyLook(false);                                  // the remembered car, on the grid
 }
 renderer.render(scene, camera);
 
