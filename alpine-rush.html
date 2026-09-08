@@ -3906,36 +3906,59 @@ const Cup = {
    Samples are taken in the frame loop, never in fastForward, so the drive
    test and the finish projection leave no trace on it. */
 const TAPE_HZ = 30, TAPE_FIELDS = 11, TAPE_MAX_S = 420;
+/* Timing is the whole art of a smooth replay. The physics moves in 1/120 s
+   steps, so a frame's positions are valid at the physics clock (simT), not
+   at the frame's; stamped with the frame clock they were up to half a metre
+   early or late at speed, and a long frame wrote the same state into two
+   slots - forward, a little behind, the right spot again: the shake. Each
+   slot at n/30 s is now interpolated between the previous frame's state and
+   this one's on the physics clock, so it is exact for the motion within a
+   frame and never duplicated. */
 const Tape = {
-  hz: TAPE_HZ, n: 0, t: 0, on: false, events: [], meta: null,
+  hz: TAPE_HZ, n: 0, t: 0, t0: 0, on: false, events: [], meta: null, prev: null, prevT: 0,
   buf: new Float32Array(4 * TAPE_FIELDS * TAPE_HZ * TAPE_MAX_S),
   get cap() { return TAPE_HZ * TAPE_MAX_S; },
   get seconds() { return this.n / TAPE_HZ; },
   /** called at the green light */
   begin() {
-    this.n = 0; this.t = 0; this.events = []; this.on = true;
+    this.n = 0; this.t = 0; this.t0 = simT; this.prev = null; this.events = []; this.on = true;
     this.meta = { seed: SEED, hour: TOD.name, wx: WX.name, diff: DIFF[diff].name, cup: Game.inCup ? Cup.data.seed : null,
                   laps: LAPS, looks: cars.map(c => ({ style: c.style, color: c.color, accent: c.accent, name: c.name })) };
   },
   stop() { this.on = false; },
-  sample(dt) {
+  /** the state of every car right now, as one flat row per car */
+  snap() {
+    return cars.map(c => [c.pos.x, c.pos.z, c.yaw, c.ctl.steer, c.ctl.throttle, c.ctl.brake,
+                          (c.ctl.hand ? 1 : 0) + (c.boosting ? 2 : 0) + (c.onTrack ? 4 : 0),
+                          c.drift, c.rpm, c.speed, c.laps]);
+  },
+  sample() {
     if (!this.on || Game.testing) return;
-    this.t += dt;
-    while (this.n / TAPE_HZ <= this.t && this.n < this.cap) {
+    const t = simT - this.t0;
+    const cur = this.snap();
+    if (!this.prev) { this.prev = cur; this.prevT = t; }
+    const span = t - this.prevT;
+    while (this.n / TAPE_HZ <= t && this.n < this.cap) {
+      const u = span > 1e-6 ? clamp((this.n / TAPE_HZ - this.prevT) / span, 0, 1) : 1;
       const base = this.n * cars.length * TAPE_FIELDS;
-      cars.forEach((c, i) => {
-        const k = base + i * TAPE_FIELDS;
-        this.buf[k] = c.pos.x; this.buf[k + 1] = c.pos.z; this.buf[k + 2] = c.yaw;
-        this.buf[k + 3] = c.ctl.steer; this.buf[k + 4] = c.ctl.throttle; this.buf[k + 5] = c.ctl.brake;
-        this.buf[k + 6] = (c.ctl.hand ? 1 : 0) + (c.boosting ? 2 : 0) + (c.onTrack ? 4 : 0);
-        this.buf[k + 7] = c.drift; this.buf[k + 8] = c.rpm; this.buf[k + 9] = c.speed; this.buf[k + 10] = c.laps;
-      });
+      for (let i = 0; i < cars.length; i++) {
+        const a = this.prev[i], b = cur[i], k = base + i * TAPE_FIELDS;
+        this.buf[k] = lerp(a[0], b[0], u); this.buf[k + 1] = lerp(a[1], b[1], u);
+        let dy = b[2] - a[2]; if (dy > Math.PI) dy -= 2 * Math.PI; else if (dy < -Math.PI) dy += 2 * Math.PI;
+        this.buf[k + 2] = a[2] + dy * u;
+        this.buf[k + 3] = b[3]; this.buf[k + 4] = b[4]; this.buf[k + 5] = b[5]; this.buf[k + 6] = u < 0.5 ? a[6] : b[6];
+        this.buf[k + 7] = lerp(a[7], b[7], u); this.buf[k + 8] = lerp(a[8], b[8], u); this.buf[k + 9] = lerp(a[9], b[9], u);
+        this.buf[k + 10] = b[10];
+      }
       this.n++;
     }
+    this.prev = cur; this.prevT = t; this.t = t;
     if (cars.every(c => c.finished)) this.on = false;          // the last flag ends the tape
   },
   /** a marker on the timeline: lap or finish, by car */
-  mark(type, car) { if (this.on && !Game.testing) this.events.push({ t: this.t, type, car: cars.indexOf(car) }); },
+  mark(type, car) {                                          // (a projected lap is not on the tape)
+    if (this.on && !Game.testing && !Game.projecting) this.events.push({ t: simT - this.t0, type, car: cars.indexOf(car) });
+  },
   /** the recorded state of car i at time t, interpolated, into `out` */
   read(i, t, out) {
     const f = clamp(t * TAPE_HZ, 0, Math.max(0, this.n - 1)), a = Math.floor(f), b = Math.min(a + 1, this.n - 1), u = f - a;
@@ -4052,7 +4075,8 @@ const Replay = {
     const step = Math.max(dt, 1e-3);
     cars.forEach((c, i) => {
       const o = Tape.read(i, this.t, this.st[i]);
-      c.yawRate = this.seeking ? 0 : wrapPi(o.yaw - c.yaw) / step;
+      const yawRate = this.seeking ? 0 : wrapPi(o.yaw - c.yaw) / step;
+      c.yawRate = this.seeking ? 0 : c.yawRate + (yawRate - c.yawRate) * approach(10, dt);
       c.pos.x = o.x; c.pos.z = o.z; c.yaw = o.yaw;
       c.ctl.steer = o.steer; c.ctl.throttle = o.throttle; c.ctl.brake = o.brake; c.ctl.hand = o.hand;
       c.boosting = o.boosting; c.onTrack = o.onTrack; c.drift = o.drift; c.speed = o.speed; c.vLong = o.speed;
@@ -4459,7 +4483,7 @@ const Game = {
   projectFinish(cap = 150) {
     const snaps = cars.map(c => c.snapshot());
     const g = { state: this.state, race: this.raceTime, now: this.now,
-                auto: this.autopilot, order: this.finishOrder.slice() };
+                auto: this.autopilot, order: this.finishOrder.slice(), acc, simT };
     this.autopilot = false;
     this.state = 'race';
     player.ctl.throttle = 0; player.ctl.brake = 0.4;      // you coast after the flag
@@ -4474,6 +4498,7 @@ const Game = {
     cars.forEach((c, i) => c.restore(snaps[i]));
     this.state = g.state; this.raceTime = g.race; this.now = g.now;
     this.autopilot = g.auto; this.finishOrder = g.order;
+    acc = g.acc; simT = g.simT;                            // the frame's step phase and the tape's clock, untouched
     this.projSeconds = simulated;
     return times;
   },
@@ -4770,7 +4795,7 @@ function collide() {
 
 /* --------------------------- 20. main loop ----------------------------- */
 const clock = new THREE.Clock();
-let acc = 0;
+let acc = 0, simT = 0;                  // fixed-step accumulator; physics time, the clock the tape is stamped with
 const FIXED = 1 / 120;
 
 /* Physics advance, shared by the render loop and Game.fastForward() so that
@@ -4786,7 +4811,7 @@ function stepSim(dt) {
   while (acc >= FIXED && steps < 8) {
     for (const c of cars) c.step(FIXED, running);
     collide();
-    acc -= FIXED; steps++;
+    acc -= FIXED; simT += FIXED; steps++;
   }
   if (steps === 8) acc = 0;
   return running;
@@ -4890,7 +4915,7 @@ function frame() {
     const running = stepSim(dt);
 
     for (const c of cars) c.updateVisual(dt, Game.now);
-    Tape.sample(dt);
+    Tape.sample();
     Ghost.sample(dt);
     Ghost.update();
     LapTrace.update();
