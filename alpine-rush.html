@@ -325,6 +325,7 @@
   #trackinfo b{ color:var(--cy); font-weight:500; }
   #recordrow{ display:flex; gap:12px; justify-content:center; align-items:center; margin-top:12px; }
   #recordrow .lbl{ letter-spacing:.22em; }
+  #pbtime small{ font-size:9px; letter-spacing:.2em; color:rgba(223,246,255,.45); font-weight:400; }
   #pbtime{ font-size:15px; font-variant-numeric:tabular-nums; color:var(--gn);
            text-shadow:0 0 12px rgba(102,255,168,.45); font-weight:700; }
   #ghosttoggle.off{ opacity:.45; }
@@ -2809,11 +2810,12 @@ const Records = {
     } catch (e) { this.ok = false; }        // quota exceeded: carry on without saving
   },
   best(seed) { const c = this.data.circuits[seed]; return c ? c.best : null; },
+  bestCls(seed) { const c = this.data.circuits[seed]; return c && c.cls ? c.cls : null; },
   trace(seed) { const c = this.data.circuits[seed]; return c ? c.g : null; },
-  submit(seed, lapMs, trace) {
+  submit(seed, lapMs, trace, cls) {
     const c = this.data.circuits[seed];
     if (c && c.best <= lapMs) return false;
-    this.data.circuits[seed] = { best: lapMs, g: trace, at: Date.now() };
+    this.data.circuits[seed] = { best: lapMs, g: trace, at: Date.now(), cls };   // the car it was set in
     this.save();
     return true;
   },
@@ -2872,7 +2874,7 @@ const Ghost = {
   /* called with a completed lap time; keeps it if it beats the stored best */
   finishLap(lapMs) {
     if (Game.testing || Game.autopilot || weatherOverridden() || this.rec.length < 10) { this.startLap(); return false; }
-    const improved = Records.submit(SEED, lapMs, this.pack(this.rec));
+    const improved = Records.submit(SEED, lapMs, this.pack(this.rec), player.style || 'gt');
     if (improved) this.loadFor(SEED);
     this.startLap();
     return improved;
@@ -3837,15 +3839,15 @@ function refreshSummary() {
   const where = live ? `CUP <b>${Cup.data.seed}</b>${sep}ROUND <b>${Cup.data.round + 1}</b>/${CUP_ROUNDS}${sep}${t.seed}`
               : mode === 'cup' ? `CUP <b>${cleanSeed(seedIn.value)}</b>${sep}ROUND 1 ON ${t.seed}`
               : `<b>${t.seed}</b>${sep}${(t.length / 1000).toFixed(2)} KM`;
-  const pb = Records.best(t.seed);
+  const pb = Records.best(t.seed), pbCls = Records.bestCls(t.seed);
   $('summary').innerHTML = `${where}${sep}${DIFF[diff].name}${sep}${t.time}${sep}${t.weather}` +
-    (pb ? `${sep}RECORD <i>${fmt(pb)}</i>` : '');
+    (pb ? `${sep}RECORD <i>${fmt(pb)}</i>${pbCls && STYLE_INFO[pbCls] ? ' ' + STYLE_INFO[pbCls].name : ''}` : '');
 }
 function showTrackInfo() {
   refreshSummary();
   const t = trackInfo;
-  const pb = Records.best(SEED);
-  $('pbtime').textContent = pb ? fmt(pb) : '--:--.---';
+  const pb = Records.best(SEED), pbCls = Records.bestCls(SEED);
+  $('pbtime').innerHTML = pb ? fmt(pb) + (pbCls && STYLE_INFO[pbCls] ? `<small> ${STYLE_INFO[pbCls].name}</small>` : '') : '--:--.---';
   $('pbtime').style.color = pb ? '' : 'rgba(223,246,255,.3)';
   // A preference, not a function of whether a record exists — disabling it made
   // the button look live while doing nothing, which reads as broken.
