@@ -2479,8 +2479,9 @@ class Car {
     const drifting = Math.abs(this.drift) > 0.16 && this.speed > 15;
     this.drifting = drifting;
     if (running) {
-      if (drifting) this.boostMeter += dt * (0.055 + Math.abs(this.drift) * 0.30) * (this.speed / 40) * this.cls.boost;
-      else if (this.speed > 40 && onTrack) this.boostMeter += dt * 0.05 * this.cls.boost;
+      const fillH = this.handicap ? 1 + this.handicap * TECH.boostH : 1;   // a handicapped car's meter fills faster too
+      if (drifting) this.boostMeter += dt * (0.055 + Math.abs(this.drift) * 0.30) * (this.speed / 40) * this.cls.boost * fillH;
+      else if (this.speed > 40 && onTrack) this.boostMeter += dt * 0.05 * this.cls.boost * fillH;
       if (this.boosting) this.boostMeter -= dt * BOOST_DRAIN;
       this.boostMeter = clamp(this.boostMeter, 0, 1);
     }
@@ -2574,7 +2575,7 @@ class Car {
         // Holding station in the tow beats going around early, so ease off the
         // avoidance while tucked in and slingshot past once close enough.
         const tucked = onStraight && fwd > 7 && sp > 30;
-        avoid -= Math.sign(side || 1) * urgency * 7.5 * this.aggro * (tucked ? TOW.aiHold : 1);
+        avoid -= Math.sign(side || 1) * urgency * 7.5 * this.aggro * (tucked ? TOW.aiHold : 1) * (this.tech ? TECH.avoidK : 1);
       }
     }
     const latErr = this.lat - a.off * this.lineBias;           // how wide of the line we are
@@ -2787,15 +2788,18 @@ class Car {
    grip alone sent it off the road, since in this model a corner's speed is
    set by yaw rate. Measured: +10 % laps 5.0 % faster than ACE, +15 % 6.8 %,
    +20 % 7.8 %, off-track unchanged; with the snow forgiving the car twice
-   the handicap (TECH.offH), +20 % is 8.9 %. The CONDITIONS tab says so. */
-const LEGEND_HANDICAP = 0.20;
+   the handicap (TECH.offH), +20 % is 8.9 %, +25 % 10.9 % and +30 % 11.4 %,
+   so it stops at 25. Pack collisions cost the rivals 0.8 % (measured with
+   TECH.aiCollide / avoidK), a faster boost fill (TECH.boostH) made them
+   slower: more boost, more snow. The CONDITIONS tab says so. */
+const LEGEND_HANDICAP = 0.25;
 const DIFF = [
   { name: 'ROOKIE', skill: 0.55, speed: 0.88, tech: 0, handicap: 0 },
   { name: 'PRO',    skill: 0.84, speed: 0.97, tech: 0, handicap: 0 },
   { name: 'ACE',    skill: 1.00, speed: 1.05, tech: 0, handicap: 0 },
   { name: 'LEGEND', skill: 1.00, speed: 1.05, tech: 1, handicap: LEGEND_HANDICAP }
 ];
-const TECH = { fill: 0, exit: 1, lat: 1.0, brake: 0.70, brakeHi: 0.70, fillMax: 0.72, fillRoom: 2.5, hold: 0.22, band: 1, look: 1.0, planPow: 1, offH: 2 };   // planPow 2 over-plans and runs wide; offH softens the snow for a handicapped car
+const TECH = { fill: 0, exit: 1, lat: 1.0, brake: 0.70, brakeHi: 0.70, fillMax: 0.72, fillRoom: 2.5, hold: 0.22, band: 1, look: 1.0, planPow: 1, offH: 2, avoidK: 1, aiCollide: 1, boostH: 0 };   // planPow 2 over-plans and runs wide; offH softens the snow for a handicapped car
 let diff = 1;
 
 const player = new Car({
@@ -3714,6 +3718,7 @@ function driveTest(atDiff = 1) {
 function collide() {
   for (let a = 0; a < cars.length; a++) for (let b = a + 1; b < cars.length; b++) {
     const A = cars[a], B = cars[b];
+    if (!TECH.aiCollide && A.ai && B.ai) continue;           // harness switch: what does the pack cost?
     const dx = B.pos.x - A.pos.x, dz = B.pos.z - A.pos.z;
     const d = Math.hypot(dx, dz);
     if (d > 4.3 || d < 0.0001) continue;
