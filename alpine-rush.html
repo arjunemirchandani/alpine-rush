@@ -1089,7 +1089,9 @@ function heightAt(x, z, hint, sub) {
 const TUNNEL_CAP = { h: 15, w: 34 };                  // ridge height over the road, half-width where it meets the ground
 const BRIDGE_GORGE = { depth: 40, w0: 60, w1: 150 };  // ravine depth; lateral fade into the mountainside
 function terrainAt(x, z, hint) {
-  const q = hint === undefined ? nearGlobal(x, z) : nearLocal(x, z, hint, 30);
+  return terrainFrom(hint === undefined ? nearGlobal(x, z) : nearLocal(x, z, hint, 30), x, z);
+}
+function terrainFrom(q, x, z) {
   const base = groundFrom(q, x, z, true);
   const f = FEAT[q.i], k = FEAT_K[q.i];
   if (!f || k <= 0) return base;
@@ -1388,10 +1390,15 @@ function buildTerrain() {
   const shadowTint = new THREE.Color(TOD.shadowTint);
   const tmp = new THREE.Color();
 
+  // each vertex also remembers where it stands relative to the road (arc
+  // length, lateral offset, road height): the shader below needs it
+  const trk = new Float32Array(n * n * 3);
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
     const k = (j * n + i) * 3;
     const x = (i / SEGS - 0.5) * SIZE, z = (j / SEGS - 0.5) * SIZE;
-    pos[k] = x; pos[k + 1] = terrainAt(x, z); pos[k + 2] = z;
+    const q = nearGlobal(x, z);
+    trk[k] = q.s; trk[k + 1] = q.lat; trk[k + 2] = q.y;
+    pos[k] = x; pos[k + 1] = terrainFrom(q, x, z); pos[k + 2] = z;
   }
   /* Bake sun occlusion into the mesh: march each vertex toward the sun over the
      height grid and see if a ridge gets in the way. Long shadows off the peaks
@@ -1457,8 +1464,40 @@ function buildTerrain() {
     col[k] = tmp.r; col[k + 1] = tmp.g; col[k + 2] = tmp.b;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('aTrack', new THREE.BufferAttribute(trk, 3));
 
-  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  /* The hill over a tunnel rises from road level to 15 m inside the bore's
+     first 25 m, and a 10 m grid cannot do that without a triangle slicing
+     through the tube. So the terrain's fragments are cut wherever they fall
+     inside a tunnel shell: the vertex attribute is interpolated across the
+     triangle, and any fragment under the shell's outer arch (less a margin
+     that keeps the cut edge inside the concrete) is discarded. The tube's
+     own meshes fill the hole. The cut runs one grid cell past each portal,
+     or the straddling triangle's outer half still pokes up through the
+     road; there it only removes ground under the road and the berm, which
+     the road and snow-bank ribbons already cover. */
+  const tunnels = FEATURES.filter(f => f.type === 'tunnel');
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+  mat.onBeforeCompile = sh => {
+    sh.uniforms.uTun = { value: [new THREE.Vector2(), new THREE.Vector2()] };
+    tunnels.forEach((f, k) => sh.uniforms.uTun.value[k].set(f.s0, f.s1));
+    sh.uniforms.uTunN = { value: tunnels.length };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', 'attribute vec3 aTrack; varying vec3 vTrack; varying float vY;\n#include <common>')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTrack = aTrack; vY = position.y;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', 'varying vec3 vTrack; varying float vY; uniform vec2 uTun[2]; uniform int uTunN;\n#include <common>')
+      .replace('void main() {', `void main() {
+  for (int k = 0; k < 2; k++) {
+    if (k >= uTunN) break;
+    if (vTrack.x > uTun[k].x - 12.0 && vTrack.x < uTun[k].y + 12.0 && abs(vTrack.y) < ${(TUBE.w + TUBE.shell - 0.15).toFixed(2)}) {
+      float u = vTrack.y / ${(TUBE.w + TUBE.shell).toFixed(2)};
+      float top = ${TUBE.c.toFixed(2)} + ${(TUBE.r + TUBE.shell).toFixed(2)} * sqrt(max(0.0, 1.0 - u * u)) - 0.35;
+      if (vY < vTrack.z + top) discard;
+    }
+  }`);
+  };
+  const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   world.add(mesh);
 }
@@ -1530,7 +1569,7 @@ function buildKerbs() {
     const pos = [], uv = [], idx = [];
     let vc = 0;
     for (let i = 0; i < N; i++) {
-      if (Math.abs(KAP[i]) < 0.0035) continue;
+      if (Math.abs(KAP[i]) < 0.0035 || FEAT[i]) continue;    // none through a structure: the wall stands there
       const j = (i + 1) % N;
       const inner = side * (HALF_W + 0.02), outer = side * (HALF_W + 1.9);
       for (const [ii, l] of [[i, inner], [i, outer], [j, inner], [j, outer]]) {
@@ -1641,6 +1680,138 @@ function buildScenery() {
     poles, d => { P.set(d[0], d[1] + 1.5, d[2]); S.set(1, 3, 1); });
 }
 
+/* ---------------------------- 9b. tunnels ------------------------------ */
+/* A bore is a horseshoe: vertical walls to TUBE.c, then a half-ellipse of
+   rise TUBE.r to the crown, a shell TUBE.shell thick outside it. Everything
+   inside is unlit, its light baked into vertex colours - a low ambient,
+   daylight spilling in from both portals, and a warm sodium pool under each
+   lamp every 12 m - so it is dark at noon and dark at dusk, indifferent to
+   the sun, and costs nothing per frame. The exterior is lit like any other
+   concrete and casts a shadow, so the sun leaves a car as it enters. */
+// light values are linear: 0.06 is a dark grey on screen, 0.3 a mid grey. The
+// floor multiplies the asphalt map (itself ~0.3), so it gets its own budget.
+const TUBE = { w: 11.5, c: 3.2, r: 4.0, shell: 1.2, lampEvery: 12, amb: 0.06, spill: 0.45, pool: 0.22, poolW: 5.0,
+               floorAmb: 0.30, floorPool: 1.3 };
+function archProfile(w, c, r, n = 14) {
+  const pts = [[-w, 0]];
+  for (let k = 0; k <= n; k++) { const a = Math.PI - Math.PI * k / n; pts.push([w * Math.cos(a), c + r * Math.sin(a)]); }
+  pts.push([w, 0]);
+  return pts;
+}
+/** loft a lateral profile ([lat, height] pairs) along centreline samples i0..i1.
+    color(i, lat, h) -> [r,g,b] is optional; uv is u across, v along the road */
+function loftTrack(i0, i1, prof, color) {
+  const rows = i1 - i0 + 1, m = prof.length;
+  const pos = new Float32Array(rows * m * 3), uv = new Float32Array(rows * m * 2);
+  const col = color ? new Float32Array(rows * m * 3) : null;
+  const idx = new Uint32Array((rows - 1) * (m - 1) * 6);
+  let o = 0;
+  for (let r = 0; r < rows; r++) {
+    const i = (i0 + r) % N;
+    for (let k = 0; k < m; k++) {
+      const [l, h] = prof[k], v = r * m + k;
+      pos[v * 3] = PX[i] + RX[i] * l; pos[v * 3 + 1] = PY[i] + h; pos[v * 3 + 2] = PZ[i] + RZ[i] * l;
+      uv[v * 2] = k / (m - 1); uv[v * 2 + 1] = CUM[i] / 34;
+      if (col) { const c = color(i, l, h); col[v * 3] = c[0]; col[v * 3 + 1] = c[1]; col[v * 3 + 2] = c[2]; }
+      if (r < rows - 1 && k < m - 1) {
+        idx[o++] = v; idx[o++] = v + m; idx[o++] = v + 1;
+        idx[o++] = v + 1; idx[o++] = v + m; idx[o++] = v + m + 1;
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  if (col) g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.computeVertexNormals();
+  return g;
+}
+/** a band between two profiles in the plane of one sample: the portal face */
+function ringAt(i, inner, outer) {
+  const m = inner.length, pos = new Float32Array(m * 2 * 3), idx = new Uint32Array((m - 1) * 6);
+  for (let k = 0; k < m; k++) {
+    for (const [j, pr] of [[0, inner], [1, outer]]) {
+      const [l, h] = pr[k], v = (k * 2 + j) * 3;
+      pos[v] = PX[i] + RX[i] * l; pos[v + 1] = PY[i] + h; pos[v + 2] = PZ[i] + RZ[i] * l;
+    }
+  }
+  let o = 0;
+  for (let k = 0; k < m - 1; k++) {
+    const a = k * 2;
+    idx[o++] = a; idx[o++] = a + 2; idx[o++] = a + 1;
+    idx[o++] = a + 1; idx[o++] = a + 2; idx[o++] = a + 3;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.computeVertexNormals();
+  return g;
+}
+/** baked light inside a bore at arc length s and height h: ambient + portal
+    spill, and the pool under the nearest lamp (brighter toward the crown) */
+function tunnelLight(f, s, h) {
+  const spill = TUBE.spill * (Math.exp(-(s - f.s0) / 20) + Math.exp(-(f.s1 - s) / 20));
+  const along = s - f.s0;                                                        // lamps at s0 + 6, 18, 30 ...
+  const d = Math.abs(((along % TUBE.lampEvery) + TUBE.lampEvery) % TUBE.lampEvery - TUBE.lampEvery / 2);
+  const pool = TUBE.pool * Math.exp(-((d / TUBE.poolW) ** 2)) * (0.45 + 0.55 * h / (TUBE.c + TUBE.r));
+  return [TUBE.amb + spill, pool];
+}
+function buildTunnels() {
+  const inner = archProfile(TUBE.w, TUBE.c, TUBE.r);
+  const outer = archProfile(TUBE.w + TUBE.shell, TUBE.c, TUBE.r + TUBE.shell);
+  const shellMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const innerMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const floorMat = new THREE.MeshBasicMaterial({ map: asphaltTex, vertexColors: true });
+  const lineMat = new THREE.MeshBasicMaterial({ color: 0xc9d2e0 });
+  const lampMat = new THREE.MeshBasicMaterial({ color: 0xffe3b8 });
+  const concrete = [0.42, 0.44, 0.48], warm = [1.0, 0.74, 0.44], snow = [0.93, 0.95, 0.98], face = [0.55, 0.57, 0.61];
+  const lampGeo = new THREE.BoxGeometry(1.6, 0.14, 0.4);
+  const M = new THREE.Matrix4(), P = new THREE.Vector3(), Qt = new THREE.Quaternion(), S = new THREE.Vector3(1, 1, 1);
+
+  for (const f of FEATURES) {
+    if (f.type !== 'tunnel') continue;
+    // exterior: concrete flanks, snow settling on the crown; casts the shade inside
+    const shell = new THREE.Mesh(loftTrack(f.i0, f.i1, outer, (i, l, h) => {
+      const up = clamp((h - TUBE.c) / (TUBE.r + TUBE.shell), 0, 1);
+      return [lerp(face[0], snow[0], up), lerp(face[1], snow[1], up), lerp(face[2], snow[2], up)];
+    }), shellMat);
+    shell.castShadow = true; shell.receiveShadow = true;
+    world.add(shell);
+    for (const i of [f.i0, f.i1]) {
+      const ring = new THREE.Mesh(ringAt(i, inner, outer), shellMat);
+      ring.geometry.setAttribute('color', new THREE.BufferAttribute(
+        Float32Array.from({ length: inner.length * 2 * 3 }, (_, k) => face[k % 3]), 3));
+      ring.castShadow = true;
+      world.add(ring);
+    }
+    // interior walls and roof, lit only by what is baked in
+    world.add(new THREE.Mesh(loftTrack(f.i0, f.i1, inner, (i, l, h) => {
+      const [amb, pool] = tunnelLight(f, CUM[i], h);
+      return [concrete[0] * amb + warm[0] * pool, concrete[1] * amb + warm[1] * pool, concrete[2] * amb + warm[2] * pool];
+    }), innerMat));
+    // floor over the sunlit road, and its edge lines
+    world.add(new THREE.Mesh(loftTrack(f.i0, f.i1, [[-TUBE.w, 0.08], [TUBE.w, 0.08]], (i, l, h) => {
+      const [amb, pool] = tunnelLight(f, CUM[i], 0);
+      const a = TUBE.floorAmb + (amb - TUBE.amb), p = pool * TUBE.floorPool;   // same spill and pools, brighter base
+      return [a + warm[0] * p, a + warm[1] * p, a + warm[2] * p];
+    }), floorMat));
+    for (const side of [1, -1])
+      world.add(new THREE.Mesh(loftTrack(f.i0, f.i1, [[side * (HALF_W - 0.75), 0.10], [side * (HALF_W - 0.15), 0.10]]), lineMat));
+    // the lamps themselves, a strip along the crown
+    const lampS = []; for (let sl = f.s0 + TUBE.lampEvery / 2; sl < f.s1 - 3; sl += TUBE.lampEvery) lampS.push(sl);
+    const lamps = new THREE.InstancedMesh(lampGeo, lampMat, lampS.length);
+    lampS.forEach((sl, k) => {
+      const a = atDist(sl);
+      P.set(a.x, a.y + TUBE.c + TUBE.r - 0.22, a.z);
+      Qt.setFromAxisAngle(UP, Math.atan2(a.tx, a.tz));
+      M.compose(P, Qt, S); lamps.setMatrixAt(k, M);
+    });
+    lamps.instanceMatrix.needsUpdate = true;
+    world.add(lamps);
+  }
+}
+
 /* One call rebuilds the entire circuit from a seed string. */
 let trackInfo = null;
 let timeChoice = -1;                       // -1 = follow the seed
@@ -1660,6 +1831,7 @@ function loadTrack(seedStr) {
   buildKerbs();
   buildStartLine();
   buildScenery();
+  buildTunnels();
   return trackInfo;
 }
 
@@ -4501,7 +4673,7 @@ window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, S
                   driveTest, DRIVE, Records, Ghost, LapTrace, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
                   TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; },
-                  get FEATURES() { return FEATURES; }, FEAT, FEAT_K, STRUCT, placeFeatures, terrainAt, TUNNEL_CAP, BRIDGE_GORGE };
+                  get FEATURES() { return FEATURES; }, FEAT, FEAT_K, STRUCT, placeFeatures, terrainAt, TUNNEL_CAP, BRIDGE_GORGE, TUBE };
 </script>
 </body>
 </html>
