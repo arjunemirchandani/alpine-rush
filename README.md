@@ -383,7 +383,11 @@ those figures were optimistic. Each rival draws a random wander phase per page l
 lap time by ~0.1–0.2 s, and on circuits where two tiers sit close together that is enough to flip
 the ordering. Any tier comparison has to average over several realisations to mean anything.
 
-**LEGEND** is a fourth tier above ACE. It drives the same car — same skill, same 5 % speed — and
+**MASTER** sits between ACE and LEGEND: it rehearses every corner (below) but drives ACE's car, with
+no handicap — on the harness 16 % faster than ACE on JAKDA, 20 % on the hairpin circuit, 8 % on the
+fast sweepers, and slower than LEGEND on all of them.
+
+**LEGEND** is the top tier. It drives the same car — same skill, same 5 % speed — and
 adds technique instead: it brakes 30 % later into corners and spends boost on corner exits, where
 boost accelerates, rather than on any clean straight. Measured on the harness it laps 2.3 % faster
 than ACE on average, up to 9 % on technical circuits, and about 1 % slower on the fastest sweeper
