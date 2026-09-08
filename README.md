@@ -83,6 +83,23 @@ if you'd rather not publish it, GitHub issues you a
 
 ---
 
+## The title screen
+
+The card is tabbed: **RACE** (single race or championship, the circuit or cup seed, featured cups,
+your record and the ghost), **CONDITIONS** (difficulty, hour, weather), **CAR** and **CONTROLS**.
+The title, a summary of what you're about to drive and START stay on screen whichever tab is open,
+and the last tab is remembered.
+
+### Choosing a car
+
+**CAR** picks a body and a livery. There are six bodies — **GT**, **WEDGE**, **COUPE**, **MUSCLE**,
+**SUPER** and **RALLY** — and eight liveries, and while the tab is open the card thins, the blur
+lifts and the camera circles your actual car on the grid, so what you see is what you'll drive. The
+choice is remembered.
+
+A car is a look, not a class. Every body shares the same physics, so a record set in the rally hatch
+is exactly as hard as one set in the wedge, and the ghost you race is the lap, not the car.
+
 ## Controls
 
 | Input | Action |
@@ -442,10 +459,10 @@ finishing spread of **0.06 seconds** across two minutes of racing.
   so it stays in time and does not gap if the tab is throttled.
 - **Cars** — lofted, not modelled. A body is a run of rounded cross-sections along its length
   (sill width, shoulder width, floor, shoulder height, corner radius) stitched into one smooth
-  shell; a second loft in glass is the cabin, with its top faces painted as the roof. Four
-  silhouettes — the player's GT, VIPER's low wedge, FROST's tall-cabin coupé, KAIJU's wide muscle
-  car — are each about 2,200 triangles, and every static part is merged into one draw call per
-  material. The paint is a metallic base under a clearcoat that reflects an environment map baked
+  shell; a second loft in glass is the cabin, with its top faces painted as the roof. Six
+  silhouettes — GT, VIPER's low wedge, FROST's tall-cabin coupé, KAIJU's wide muscle car, a
+  mid-engined supercar and a rally hatch — are each about 2,200 triangles, and every static part
+  is merged into one draw call per material. The paint is a metallic base under a clearcoat that reflects an environment map baked
   from the sky dome whenever the hour or weather changes, so golden hour glows on the bodywork.
 - **Terrain** — ridged fBm over a 280×280 grid, vertex-coloured for rock / snow / pine.
 - **Textures** — asphalt, kerbs and the chequered line are drawn to `<canvas>` at load.
