@@ -1690,6 +1690,7 @@ function buildScenery() {
    concrete and casts a shadow, so the sun leaves a car as it enters. */
 // light values are linear: 0.06 is a dark grey on screen, 0.3 a mid grey. The
 // floor multiplies the asphalt map (itself ~0.3), so it gets its own budget.
+const TUNNEL_VERB = 0.55;                              // reverb send inside a bore
 const TUBE = { w: 11.5, c: 3.2, r: 4.0, shell: 1.2, lampEvery: 12, amb: 0.06, spill: 0.45, pool: 0.22, poolW: 5.0,
                floorAmb: 0.30, floorPool: 1.3 };
 function archProfile(w, c, r, n = 14) {
@@ -2426,6 +2427,25 @@ const Sfx = {
     this.rumble  = this.makeLoop(buf, 'lowpass', 240, 0.9);
     this.wind    = this.makeLoop(buf, 'highpass', 520, 0.6);
     this.tow     = this.makeLoop(buf, 'bandpass', 420, 0.9);
+
+    // ---- the tunnel: a convolver on a send bus. Its impulse is 1.4 s of
+    // noise decaying exponentially with the top rolled off as it goes, which
+    // is what a long concrete bore does to an engine. The engines and the
+    // tyres feed the send; its gain is 0 outside and TUNNEL_VERB inside.
+    const verb = ctx.createConvolver();
+    const ir = ctx.createBuffer(2, ctx.sampleRate * 1.4, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const v = ir.getChannelData(ch); let lp = 0;
+      for (let i = 0; i < v.length; i++) {
+        const t = i / ctx.sampleRate, env = Math.exp(-t * 4.2) * (t < 0.012 ? 0 : 1);   // 12 ms pre-delay
+        lp += ((Math.random() * 2 - 1) - lp) * (0.35 - 0.25 * t / 1.4);                    // darker as it decays
+        v[i] = lp * env;
+      }
+    }
+    verb.buffer = ir;
+    const send = this.verbSend = ctx.createGain(); send.gain.value = 0;
+    send.connect(verb); verb.connect(master);
+    this.engine.out.connect(send); this.rival.out.connect(send); this.screech.g.connect(send);
     this.ok = true;
   },
 
@@ -4400,7 +4420,10 @@ function frame() {
       // the weather's howl sits under the speed wind and gusts on the same
       // slow sines the physics leans on the car with
       const howl = WX.howl * (0.75 + 0.25 * Math.sin(Game.now * 0.55) * Math.sin(Game.now * 1.9 + 1));
-      Sfx.set(Sfx.wind, clamp(player.speed / TOP_SPEED, 0, 1) * 0.07 + howl, WX.howl ? 380 : 520);
+      // in a tunnel the wind goes and the walls come back
+      const inTunnel = FEAT[player.hint] === F_TUNNEL;
+      Sfx.set(Sfx.wind, (clamp(player.speed / TOP_SPEED, 0, 1) * 0.07 + howl) * (inTunnel ? 0.25 : 1), WX.howl ? 380 : 520);
+      Sfx.verbSend.gain.setTargetAtTime(inTunnel ? TUNNEL_VERB : 0, Sfx.ctx.currentTime, 0.12);
       Sfx.set(Sfx.tow, (player.tow || 0) * 0.085, 320 + (player.tow || 0) * 680);
     }
   }
