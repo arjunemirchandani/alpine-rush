@@ -1629,6 +1629,19 @@ const STYLE_INFO = {
   super:  { name: 'SUPER',  blurb: 'MID-ENGINED · CAB FORWARD, WIDE HIPS, LOW' },
   rally:  { name: 'RALLY',  blurb: 'THE HATCH · SHORT, TALL, ROOF SPOILER' }
 };
+/* what each body does, as multipliers the physics and the AI both read:
+   top (vmax), accel (engine force), grip (on-track lateral), boost (meter
+   fill), off (speed and grip off the tarmac), wx (how much of the weather's
+   grip loss the car feels). Balanced on the headless harness so no class is
+   a loser or a lock: see the commit history for the numbers. */
+const CLASSES = {
+  gt:     { top: 1.00, accel: 1.00, grip: 1.00, boost: 1.00, off: 1.00, wx: 1.00, tag: 'BALANCED · NO SURPRISES' },
+  wedge:  { top: 1.01, accel: 0.95, grip: 1.07, boost: 0.94, off: 0.92, wx: 1.00, tag: 'AERO GRIP · PLANTED IN THE FAST STUFF' },
+  coupe:  { top: 0.98, accel: 1.00, grip: 1.03, boost: 1.06, off: 1.00, wx: 1.00, tag: 'CLEAN · BOOST FOR DAYS' },
+  muscle: { top: 1.05, accel: 1.09, grip: 0.95, boost: 1.00, off: 0.95, wx: 1.00, tag: 'POWER · DRIFTS AT A GLANCE' },
+  super:  { top: 1.06, accel: 1.02, grip: 1.00, boost: 0.88, off: 0.90, wx: 1.00, tag: 'FASTEST ON THE STRAIGHT · SHORT BOOST' },
+  rally:  { top: 0.975, accel: 1.07, grip: 0.97, boost: 1.08, off: 1.30, wx: 0.60, tag: 'FORGIVING OFF THE TARMAC · SNOW-READY' }
+};
 const LIVERIES = [
   { name: 'ICE',     color: 0x1fd3ff, accent: 0xffffff },
   { name: 'AMBER',   color: 0xffb020, accent: 0x14161c },
@@ -2245,6 +2258,7 @@ const _v = new THREE.Vector3(), _n = new THREE.Vector3(), _q1 = new THREE.Quater
 class Car {
   constructor(cfg) {
     Object.assign(this, cfg);
+    this.cls = CLASSES[cfg.style] || CLASSES.gt;
     const built = buildCar(cfg.color, cfg.accent, cfg.style);
     this.view = built.group;
     this.parts = built;
@@ -2277,6 +2291,7 @@ class Car {
     this.view.traverse(o => { if (o.isMesh) { o.geometry.dispose(); for (const m of [].concat(o.material)) { ENV_MATS.delete(m); m.dispose(); } } });
     this.parts.blob.geometry.dispose(); this.parts.blob.material.dispose();
     this.style = style; this.color = color; this.accent = accent;
+    this.cls = CLASSES[style] || CLASSES.gt;
     const built = buildCar(color, accent, style);
     this.view = built.group; this.parts = built;
     scene.add(this.view, built.blob);
@@ -2361,11 +2376,12 @@ class Car {
     this.tow = tow; this.towCar = towCar;
 
     // ---- longitudinal
-    const vmax = TOP_SPEED * (wantBoost ? 1.16 : 1) * (onTrack ? 1 : 0.6)
+    const K = this.cls;
+    const vmax = TOP_SPEED * K.top * (wantBoost ? 1.16 : 1) * (onTrack ? 1 : Math.min(0.6 * K.off, 0.9))
                * (this.speedMul || 1) * (1 + TOW.vmax * tow);
     let acc = 0;
     if (running) {
-      if (c.throttle > 0) acc += ENGINE * c.throttle * Math.max(0, 1 - Math.max(0, vL) / vmax);
+      if (c.throttle > 0) acc += ENGINE * K.accel * c.throttle * Math.max(0, 1 - Math.max(0, vL) / vmax);
       if (wantBoost) acc += 21;
       if (c.throttle > 0) acc += TOW.accel * tow;            // the tow only pulls under power
       if (c.brake > 0) acc -= (vL > 0.6 ? BRAKE_A : REVERSE_A) * c.brake;
@@ -2382,7 +2398,9 @@ class Car {
       vT += WX.gust * (Math.sin(t * 0.55 + ph) * 0.6 + Math.sin(t * 1.9 + ph * 1.7) * 0.4) * dt;
     }
     // ---- lateral grip: the whole drift model lives here
-    let grip = (onTrack ? 5.4 : 2.1) * WX.grip;
+    // a rally car feels only part of the weather's grip loss
+    const wxGrip = 1 - (1 - WX.grip) * K.wx;
+    let grip = (onTrack ? 5.4 * K.grip : 2.1 * K.off) * wxGrip;
     if (c.hand && running) grip *= 0.15;
     else if (c.brake > 0.4 && Math.abs(vL) > 24) grip *= 0.62;   // trail-braking rotation
     if (wantBoost) grip *= 0.9;
@@ -2443,8 +2461,8 @@ class Car {
     const drifting = Math.abs(this.drift) > 0.16 && this.speed > 15;
     this.drifting = drifting;
     if (running) {
-      if (drifting) this.boostMeter += dt * (0.055 + Math.abs(this.drift) * 0.30) * (this.speed / 40);
-      else if (this.speed > 40 && onTrack) this.boostMeter += dt * 0.05;
+      if (drifting) this.boostMeter += dt * (0.055 + Math.abs(this.drift) * 0.30) * (this.speed / 40) * this.cls.boost;
+      else if (this.speed > 40 && onTrack) this.boostMeter += dt * 0.05 * this.cls.boost;
       if (this.boosting) this.boostMeter -= dt * BOOST_DRAIN;
       this.boostMeter = clamp(this.boostMeter, 0, 1);
     }
@@ -2556,7 +2574,7 @@ class Car {
     // Planning above ~26 means demanding grip that mostly is not there, so the
     // car runs wide and loses more than the ambition gains. Ceiling ~25.5 for
     // the best drivers; their edge comes from line-holding and top speed.
-    const latGrip = (17.5 + this.skill * 8) * WX.grip;     // less to lean on in the snow
+    const latGrip = (17.5 + this.skill * 8) * (1 - (1 - WX.grip) * this.cls.wx) * this.cls.grip;   // the car it is driving
     let vT = Math.sqrt(latGrip / k);
     // already wide? recover first. Without this, a high-skill driver plans an
     // ambitious corner speed, runs wide, and plans the next one just as fast —
@@ -2570,7 +2588,7 @@ class Car {
       const gap = (player.progress - this.progress) / TOTAL;
       band = 1 + clamp(gap, -0.09, 0.09) * (gap > 0 ? 0.85 : 0.45);
     }
-    vT = Math.min(vT, TOP_SPEED * this.speedMul * band);
+    vT = Math.min(vT, TOP_SPEED * this.cls.top * this.speedMul * band);
 
     if (sp > vT + 1.5) { c.brake = clamp((sp - vT) * 0.2, 0, 1); c.throttle = 0; }
     else { c.throttle = 1; c.brake = 0; }
@@ -4088,7 +4106,7 @@ requestAnimationFrame(() => {
 //   __rush.Perf.bench()            -> 40 forced frames, ms each: compare before and after a change
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
-                  driveTest, DRIVE, Records, Ghost, LapTrace, Cup, Perf, buildCar,
+                  driveTest, DRIVE, Records, Ghost, LapTrace, Cup, Perf, buildCar, CLASSES,
                   TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
 </script>
