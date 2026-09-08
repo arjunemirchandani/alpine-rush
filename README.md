@@ -440,12 +440,20 @@ finishing spread of **0.06 seconds** across two minutes of racing.
   in under the results card: Am–F–C–G at 92 BPM, soft triangle lead over a sine bass and a quiet
   sawtooth pad. Notes are scheduled on the audio clock rather than with timers, two seconds ahead,
   so it stays in time and does not gap if the tab is throttled.
+- **Cars** — lofted, not modelled. A body is a run of rounded cross-sections along its length
+  (sill width, shoulder width, floor, shoulder height, corner radius) stitched into one smooth
+  shell; a second loft in glass is the cabin, with its top faces painted as the roof. Four
+  silhouettes — the player's GT, VIPER's low wedge, FROST's tall-cabin coupé, KAIJU's wide muscle
+  car — are each about 2,200 triangles, and every static part is merged into one draw call per
+  material. The paint is a metallic base under a clearcoat that reflects an environment map baked
+  from the sky dome whenever the hour or weather changes, so golden hour glows on the bodywork.
 - **Terrain** — ridged fBm over a 280×280 grid, vertex-coloured for rock / snow / pine.
 - **Textures** — asphalt, kerbs and the chequered line are drawn to `<canvas>` at load.
 - **Effects** — pooled GPU particles for tyre smoke and snow spray; skid marks are a ring buffer
   of 2400 quads that fade via a birth-time attribute in the shader (zero per-frame CPU cost).
 
-Roughly 45 draw calls and 590k triangles.
+Roughly 96 draw calls and 645k triangles a frame on the title scene — the terrain is most of it;
+all five cars together are under 12k.
 
 ---
 
@@ -459,6 +467,8 @@ __rush.player.boostMeter = 1       // fill the boost bar
 __rush.Game.respawn()              // pop back onto the racing line
 __rush.applySeed('ZEBRA')          // rebuild the circuit in place
 __rush.Game.fastForward(105)       // simulate 105s headlessly (~120 ms)
+__rush.Perf.snapshot()             // live fps, frame ms (mean / p95), draw calls, triangles
+__rush.Perf.bench()                // 40 forced frames, ms each: compare before and after a change
 ```
 
 Autopilot is off by default and takes effect on the next frame — no restart needed.
