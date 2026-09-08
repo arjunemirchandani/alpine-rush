@@ -3188,6 +3188,10 @@ function driveTest() {
   Game.autopilot = true;
   diff = 1;                                  // always judged at PRO, not the player's pick
   applyDifficulty();
+  // and always judged dry: this runs inside generateTrack, before the seed's
+  // own weather is applied, so without this it would inherit whatever WX the
+  // last circuit left behind and the same seed could accept a different track
+  const savedWX = WX; WX = WEATHER[0];
   cars.forEach((c, i) => {
     c.placeOnGrid(i);
     c.wp = i * 1.7; c.wf = 0.34 + i * 0.05;  // fixed phases: no per-session variation
@@ -3213,6 +3217,7 @@ function driveTest() {
   Game.state = g.state; Game.raceTime = g.race; Game.now = g.now; Game.autopilot = g.auto;
   Game.finishOrder = g.order; Game.projected = g.proj; Game.testing = g.testing;
   diff = savedDiff; applyDifficulty();
+  WX = savedWX;
 
   return {
     offPct: +offPct.toFixed(2), respawns, slowest: +Math.min(...advanced).toFixed(2),
