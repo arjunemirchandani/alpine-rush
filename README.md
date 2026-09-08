@@ -134,6 +134,7 @@ A record is still per circuit, but it remembers which car set it.
 | `SPACE` | Handbrake — initiates a drift |
 | `SHIFT` | Boost (spends the meter) |
 | `C` | Cycle camera (chase / bonnet / cinematic) |
+| `V` | Rear-view mirror on / off |
 | `R` | Respawn on the racing line |
 | `P` or `ESC` | Pause · `M` Mute |
 
