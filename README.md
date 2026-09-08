@@ -175,7 +175,7 @@ regenerate together.
 The title card reports what you're about to drive:
 
 ```
-2.29 KM · 11 CORNERS · TIGHTEST 48M · 42% FLAT OUT · TECHNICAL · 2 TUNNELS · BRIDGE · 3 DRAWS
+2.29 KM · 11 CORNERS · TIGHTEST 48M · 42% FLAT OUT · TECHNICAL · 2 TUNNELS · BRIDGE · GALLERY · 3 DRAWS
 ```
 
 ### Why every seed is drivable
@@ -380,6 +380,16 @@ slicing through the bore, so the terrain's fragments are discarded wherever they
 tunnel's shell. Each vertex carries its arc length, lateral offset and road height; the cut edge
 lands inside the concrete. Frame time was unchanged (0.63–0.67 ms against 0.67–0.70 on a seed with
 no structures). Draw calls: 95, was 96.
+
+**Avalanche galleries** are the third structure (55% of circuits, dealt after the tunnels and
+bridges so nothing else moves): a concrete roof over the road, a solid wall on the mountain side,
+square pillars on a sill on the valley side — the outside of the bend when the stretch turns. The
+hill is one-sided: on the closed side it buries the wall and lies on the roof as snow; beyond the
+sill the ground falls 25 m, so you see the drop between the pillars while you are under cover. The
+interior is baked like the tunnel's but with the hour's actual sun: every vertex casts a ray at it
+and asks whether it escapes between the pillars, over the sill, under the roof's edge or out an
+end, so the floor carries real sun bars at the angle of the day, faint in a blizzard, none when the
+sun is on the mountain side. The reverb comes back at half strength.
 
 ### Drift physics
 
@@ -599,7 +609,7 @@ __rush.applySeed('ZEBRA')          // rebuild the circuit in place
 __rush.Game.fastForward(105)       // simulate 105s headlessly (~120 ms)
 __rush.Perf.snapshot()             // live fps, frame ms (mean / p95), draw calls, triangles
 __rush.Perf.bench()                // 40 forced frames, ms each: compare before and after a change
-__rush.FEATURES                    // this circuit's tunnels and bridges: type, sample range, arc length
+__rush.FEATURES                    // this circuit's tunnels, bridges and galleries: type, range, open side
 ```
 
 Autopilot is off by default and takes effect on the next frame — no restart needed.
