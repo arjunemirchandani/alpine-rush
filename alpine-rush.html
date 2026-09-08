@@ -962,8 +962,10 @@ sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 40; sun.shadow.camera.far = 1100;
 sun.shadow.camera.left = -70; sun.shadow.camera.right = 70;
 sun.shadow.camera.top = 70;   sun.shadow.camera.bottom = -70;
-sun.shadow.bias = -0.0016;
-sun.shadow.normalBias = 0.5;
+// normalBias is in world units: at 0.5 m a dusk sun (23 deg up) slid every
+// car's shadow ~1.2 m along the road, so the car looked airborne
+sun.shadow.bias = -0.0006;
+sun.shadow.normalBias = 0.06;
 scene.add(sun, sun.target);
 const hemi = new THREE.HemisphereLight(0xcfe6ff, 0xffffff, 0.78);
 const ambient = new THREE.AmbientLight(0xa8c6e6, 0.24);
@@ -2498,6 +2500,8 @@ class Car {
     for (const f of this.parts.flames) { f.material.opacity = fo; f.scale.z = 0.8 + Math.random() * 0.7; }
     // contact shadow
     this.parts.blob.position.set(px, this.groundY + 0.06, pz);
+    this.parts.blob.quaternion.copy(_q1);                   // lie on the road, not on the horizontal
+    this.parts.blob.rotateX(-Math.PI / 2);
     this.parts.blob.scale.setScalar(1);
 
     // slush spray: snow on the road comes off the rear wheels at speed as a low
