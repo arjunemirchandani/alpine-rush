@@ -2551,6 +2551,36 @@ class Car {
     this.lastSkid = [null, null];
   }
 
+  /* the speed the reactive driver wants right now: from the tightest bend in
+     the braking zone ahead and the lateral grip it can plan on. Measured: the
+     car actually pulls ~26.7 m/s^2 lateral at p90, 28.9 at p95; planning above
+     ~26 demands grip that mostly is not there and runs wide, so ~25.5 is the
+     ceiling for the best drivers and their edge is line-holding and top speed. */
+  planSpeed() {
+    const sp = this.speed;
+    // technique: brake later, but by less the faster the car is going; a late
+    // brake into a slow corner is a gain, into a fast sweeper it is the snow
+    const late = this.tech ? lerp(TECH.brake, TECH.brakeHi, clamp((sp - 38) / 24, 0, 1)) : 1;
+    const brakeZone = (14 + sp * sp / 46) * late;
+    const k = Math.max(maxKappa(this.s + 5, brakeZone), 0.0008);
+    this.kAhead = k;
+    const latGrip = (17.5 + this.skill * 8) * (1 - (1 - WX.grip) * this.cls.wx) * this.cls.grip   // the car it is driving
+                  * (this.tech ? TECH.lat : 1) * Math.pow(1 + (this.handicap || 0), TECH.planPow);   // yaw x H turns radius v/w
+    let vT = Math.sqrt(latGrip / k);
+    // already wide? recover first. Without this, a high-skill driver plans an
+    // ambitious corner speed, runs wide, and plans the next one just as fast -
+    // which made PRO slower than ROOKIE on tight circuits.
+    const wide = clamp((Math.abs(this.lat) - (HALF_W - 3.5)) / 5, 0, 1);
+    vT *= 1 - wide * 0.26;
+    // gentle rubber band so the pack stays entertaining
+    let band = 1;
+    if (!player.finished && !(this.tech && !TECH.band)) {     // a legend does not wait for you
+      const gap = (player.progress - this.progress) / TOTAL;
+      band = 1 + clamp(gap, -0.09, 0.09) * (gap > 0 ? 0.85 : 0.45);
+    }
+    return Math.min(vT, TOP_SPEED * this.cls.top * (1 + (this.handicap || 0)) * this.speedMul * band);
+  }
+
   /* ---- rehearsal. Run this car alone under a scripted control for a
      horizon, score where it got to, put everything back. It is the same
      step() the race runs, so the prediction is the physics itself, not a
@@ -2619,32 +2649,10 @@ class Car {
     const ang = wrapPi(Math.atan2(tx - this.pos.x, tz - this.pos.z) - this.yaw);
     c.steer = clamp(ang * 2.5 - this.drift * 0.55, -1, 1);
 
-    // corner-speed planning
-    // technique: brake later, but by less the faster the car is going; a late
-    // brake into a slow corner is a gain, into a fast sweeper it is the snow
-    const late = this.tech ? lerp(TECH.brake, TECH.brakeHi, clamp((sp - 38) / 24, 0, 1)) : 1;
-    const brakeZone = (14 + sp * sp / 46) * late;
-    const k = Math.max(maxKappa(this.s + 5, brakeZone), 0.0008);
-    // Measured: the car actually pulls ~26.7 m/s^2 lateral at p90, 28.9 at p95.
-    // Planning above ~26 means demanding grip that mostly is not there, so the
-    // car runs wide and loses more than the ambition gains. Ceiling ~25.5 for
-    // the best drivers; their edge comes from line-holding and top speed.
-    const latGrip = (17.5 + this.skill * 8) * (1 - (1 - WX.grip) * this.cls.wx) * this.cls.grip   // the car it is driving
-                  * (this.tech ? TECH.lat : 1) * Math.pow(1 + (this.handicap || 0), TECH.planPow);   // yaw x H turns radius v/w: capacity ~ H^2
-    let vT = Math.sqrt(latGrip / k);
-    // already wide? recover first. Without this, a high-skill driver plans an
-    // ambitious corner speed, runs wide, and plans the next one just as fast —
-    // which made PRO slower than ROOKIE on tight circuits.
-    const wide = clamp((Math.abs(this.lat) - (HALF_W - 3.5)) / 5, 0, 1);
-    vT *= 1 - wide * 0.26;
-
-    // gentle rubber band so the pack stays entertaining
-    let band = 1;
-    if (!player.finished && !(this.tech && !TECH.band)) {     // a legend does not wait for you
-      const gap = (player.progress - this.progress) / TOTAL;
-      band = 1 + clamp(gap, -0.09, 0.09) * (gap > 0 ? 0.85 : 0.45);
-    }
-    vT = Math.min(vT, TOP_SPEED * this.cls.top * (1 + (this.handicap || 0)) * this.speedMul * band);
+    // corner-speed planning, as a method so a rehearsal can call it each step
+    const vT = this.planSpeed();
+    const k = this.kAhead;
+    this.avoidOff = avoid;
 
     if (sp > vT + 1.5) { c.brake = clamp((sp - vT) * 0.2, 0, 1); c.throttle = 0; }
     else { c.throttle = 1; c.brake = 0; }
@@ -2677,6 +2685,32 @@ class Car {
     }
     // slingshot: a good tow plus boost in hand is the moment to commit
     if (this.tow > 0.45 && this.boostMeter > 0.25 && onStraight) c.boost = true;
+
+    // ---- rehearsal (LEGEND): every REH.every seconds, try each script for
+    // the next horizon and follow the winner's first slice. Receding
+    // horizon: the plan is always the freshest one, and "keep doing what
+    // you are doing" is one of the candidates, so a slide can be held.
+    // The trials are spread over frames (REH.perFrame each) so the cost is a
+    // steady fraction of a frame rather than a spike when the queue refills.
+    if (tech && TECH.rehearse && sp > 8) {
+      this.rehT = (this.rehT ?? this.gridSlot * 0.11) - dt;
+      if (this.rehT <= 0 && !this.rehQueue) {
+        const lite = Game.projecting;
+        this.rehT = REH.every * (lite ? 2 : 1);
+        this.rehQueue = (lite ? REH_LITE : REH_SCRIPTS).map(sc => ({ script: sc, t: 0 }));
+        if (this.plan) this.rehQueue.push({ script: this.plan.script, t: this.plan.t });   // ...or carry on
+        this.rehBest = null;
+      }
+      if (this.rehQueue) {
+        for (let n = 0; n < REH.perFrame && this.rehQueue.length; n++) {
+          const cand = this.rehQueue.shift(), t0 = cand.t;
+          const r = this.rehearse(t0 ? (t, car, cc) => cand.script.fn(t + t0, car, cc) : cand.script.fn);
+          if (!this.rehBest || r.score > this.rehBest.score) this.rehBest = { script: cand.script, score: r.score, t: t0 };
+        }
+        if (!this.rehQueue.length) { this.plan = this.rehBest; this.rehQueue = null; }
+      }
+      if (this.plan) { this.plan.t += dt; this.plan.script.fn(this.plan.t, this, c); }
+    }
   }
 
   /* ---------- visuals ---------- */
@@ -2825,7 +2859,7 @@ class Car {
    so it stops at 25. Pack collisions cost the rivals 0.8 % (measured with
    TECH.aiCollide / avoidK), a faster boost fill (TECH.boostH) made them
    slower: more boost, more snow. The CONDITIONS tab says so. */
-const LEGEND_HANDICAP = 0.25;
+const LEGEND_HANDICAP = 0.10;
 const DIFF = [
   { name: 'ROOKIE', skill: 0.55, speed: 0.88, tech: 0, handicap: 0 },
   { name: 'PRO',    skill: 0.84, speed: 0.97, tech: 0, handicap: 0 },
@@ -2836,8 +2870,41 @@ const DIFF = [
    speedW: a metre of score per m/s of exit speed (roughly, what that speed
    is worth over the next second). offW: metres of score lost per second in
    the snow. boostW: metres per full meter banked. */
-const REH = { horizon: 2.0, dt: 1 / 120, speedW: 1.0, offW: 30, boostW: 8 };
-const TECH = { fill: 0, exit: 1, lat: 1.0, brake: 0.70, brakeHi: 0.70, fillMax: 0.72, fillRoom: 2.5, hold: 0.22, band: 1, look: 1.0, planPow: 1, offH: 2, avoidK: 1, aiCollide: 1, boostH: 0 };   // planPow 2 over-plans and runs wide; offH softens the snow for a handicapped car
+const REH = { horizon: 2.0, dt: 1 / 120, speedW: 1.0, offW: 30, boostW: 8, every: 0.35, side: 3.5, hand: 0.35, perFrame: 2 };
+/* what a rehearsal can try: aim at an offset from the racing line, slide
+   for a while (and while sliding, stop fighting the slide), boost after a
+   moment, and carry a little more or less speed than the reactive planner
+   would. Throttle and brake follow that planner so a script never simply
+   drives into a corner flat out. */
+function rehScript(name, off, hand, boostAt, carry) {
+  const fn = (t, car, c) => {
+    const sliding = t < hand;
+    c.steer = car.steerTo(off + (car.avoidOff || 0), sliding ? 0 : 0.55);
+    c.hand = sliding;
+    c.boost = boostAt >= 0 && t >= boostAt && car.boostMeter > BOOST_MIN;
+    const vT = car.planSpeed() * carry;                       // brake for what is actually ahead of the trial
+    if (car.speed > vT + 1.5 && !sliding) { c.brake = clamp((car.speed - vT) * 0.2, 0, 1); c.throttle = 0; }
+    else { c.throttle = 1; c.brake = 0; }
+  };
+  return { name, fn };
+}
+const REH_SCRIPTS = [
+  rehScript('line',      0,          0,         -1, 1.00),
+  rehScript('line+',     0,          0,         -1, 1.08),
+  rehScript('lineB',     0,          0,        0.0, 1.00),
+  rehScript('in',       -REH.side,   0,         -1, 1.00),
+  rehScript('out',       REH.side,   0,         -1, 1.00),
+  rehScript('inS',      -REH.side,   REH.hand,  -1, 1.06),
+  rehScript('outS',      REH.side,   REH.hand,  -1, 1.06),
+  rehScript('lineS',     0,          REH.hand,  -1, 1.06),
+  rehScript('inSB',     -REH.side,   REH.hand,  0.5, 1.06),
+  rehScript('outSB',     REH.side,   REH.hand,  0.5, 1.06)
+];
+/* the finish-line projection simulates the rest of the race synchronously;
+   with every rival rehearsing it took six seconds mid-race. It gets a
+   lighter set, half as often: close enough for a projected gap. */
+const REH_LITE = REH_SCRIPTS.filter(sc => ['line', 'lineB', 'inS', 'outS', 'lineS'].includes(sc.name));
+const TECH = { fill: 0, exit: 1, lat: 1.0, brake: 0.70, brakeHi: 0.70, fillMax: 0.72, fillRoom: 2.5, hold: 0.22, band: 1, look: 1.0, planPow: 1, offH: 2, avoidK: 1, aiCollide: 1, boostH: 0, rehearse: 1 };   // planPow 2 over-plans and runs wide; offH softens the snow for a handicapped car
 let diff = 1;
 
 const player = new Car({
@@ -3488,7 +3555,9 @@ const Game = {
     player.ctl.throttle = 0; player.ctl.brake = 0.4;      // you coast after the flag
     player.ctl.hand = false; player.ctl.boost = false;
 
+    this.projecting = true;
     const simulated = this.fastForward(cap, () => cars.every(c => c.finished) ? false : undefined);
+    this.projecting = false;
     const times = new Map();
     for (const c of cars) if (c.finished) times.set(c, { t: c.finishTime, projected: !snaps[cars.indexOf(c)].finished });
 
@@ -3929,7 +3998,7 @@ const DIFF_NOTES = [
   'RIVALS AT 88 % · A FIRST DRIVE',
   'RIVALS AT 97 % · THE MEASURED BASELINE',
   'RIVALS AT 105 % · THE AI AT ITS CORNERING CEILING',
-  `ACE'S SKILL · BRAKES LATER, BOOSTS ON EXITS · <b>CARS +${Math.round(LEGEND_HANDICAP * 100)} % SPEED, POWER, GRIP, STEERING · THE SNOW FORGIVES THEM</b> — YOU ASKED FOR IT`
+  `<b>REHEARSES EVERY CORNER</b> — TRIES THE LINE, THE SLIDE AND THE BOOST BEFORE COMMITTING · CARS +${Math.round(LEGEND_HANDICAP * 100)} %`
 ];
 function refreshSummary() {
   $('difflbl').innerHTML = DIFF_NOTES[diff] || '';
