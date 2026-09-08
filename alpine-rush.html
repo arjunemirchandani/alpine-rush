@@ -1584,7 +1584,9 @@ function buildKerbs() {
     for (let i = 0; i < N; i++) {
       if (Math.abs(KAP[i]) < 0.0035 || FEAT[i]) continue;    // none through a structure: the wall stands there
       const j = (i + 1) % N;
-      const inner = side * (HALF_W + 0.02), outer = side * (HALF_W + 1.9);
+      // inner < outer keeps the winding facing up on both sides; listed from
+      // the road outward, the right-hand kerbs faced down and were never drawn
+      const inner = Math.min(side * (HALF_W + 0.02), side * (HALF_W + 1.9)), outer = Math.max(side * (HALF_W + 0.02), side * (HALF_W + 1.9));
       for (const [ii, l] of [[i, inner], [i, outer], [j, inner], [j, outer]]) {
         pos.push(PX[ii] + RX[ii] * l, PY[ii] + 0.11 + Math.abs(l - side * HALF_W) * 0.03, PZ[ii] + RZ[ii] * l);
       }
