@@ -2729,9 +2729,11 @@ const player = new Car({
   skill: 0.95, lineBias: 1, aggro: 0.8, driftSkill: 0.85
 });
 const rivals = [
-  new Car({ name: 'VIPER', ai: true, style: 'wedge',  color: 0xff2d3f, accent: 0xffcc33, lineBias: 1.0, aggro: 0.9, driftSkill: 0.8 }),
-  new Car({ name: 'FROST', ai: true, style: 'coupe',  color: 0xe8eef7, accent: 0x35e6ff, lineBias: 0.9, aggro: 0.6, driftSkill: 0.6 }),
-  new Car({ name: 'KAIJU', ai: true, style: 'muscle', color: 0x8b5cff, accent: 0x66ffa8, lineBias: 1.05, aggro: 1.0, driftSkill: 0.95 })
+  // base is the identity colour; alt is worn only while the player's livery
+  // comes too close to it, so you never race your own twin
+  new Car({ name: 'VIPER', ai: true, style: 'wedge',  color: 0xff2d3f, base: 0xff2d3f, alt: 0xb3141f, accent: 0xffcc33, lineBias: 1.0, aggro: 0.9, driftSkill: 0.8 }),
+  new Car({ name: 'FROST', ai: true, style: 'coupe',  color: 0xe8eef7, base: 0xe8eef7, alt: 0x9fb4c8, accent: 0x35e6ff, lineBias: 0.9, aggro: 0.6, driftSkill: 0.6 }),
+  new Car({ name: 'KAIJU', ai: true, style: 'muscle', color: 0x8b5cff, base: 0x8b5cff, alt: 0x5a2fd8, accent: 0x66ffa8, lineBias: 1.05, aggro: 1.0, driftSkill: 0.95 })
 ];
 const cars = [player, ...rivals];
 
@@ -3921,9 +3923,17 @@ function showCupInfo() {
 let look = Object.assign({ style: 'gt', livery: 0 }, Records.data.prefs.look || {});
 if (!STYLES[look.style]) look.style = 'gt';
 if (!LIVERIES[look.livery]) look.livery = 0;
+/* straight-line distance in RGB, 0..441; under 90 two liveries read as one */
+function colorDist(a, b) {
+  return Math.hypot((a >> 16) - (b >> 16), ((a >> 8) & 255) - ((b >> 8) & 255), (a & 255) - (b & 255));
+}
 function applyLook(save = true) {
   const L = LIVERIES[look.livery];
   player.setLook(look.style, L.color, L.accent);
+  for (const r of rivals) {
+    const want = colorDist(r.base, L.color) < 90 ? r.alt : r.base;
+    if (r.color !== want) r.setLook(r.style, want, r.accent);
+  }
   document.querySelectorAll('.sbtn').forEach(b => b.classList.toggle('sel', b.dataset.style === look.style));
   document.querySelectorAll('.lbtn').forEach(b => b.classList.toggle('sel', +b.dataset.livery === look.livery));
   $('carblurb').textContent = `${STYLE_INFO[look.style].blurb} · ${L.name}`;
