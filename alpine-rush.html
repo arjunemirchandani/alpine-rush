@@ -203,6 +203,9 @@
           display:flex; flex-direction:column; justify-content:center; }
   .pane{ display:none; }
   .pane.sel{ display:block; }
+  #summary{ margin-top:16px; font-size:10.5px; letter-spacing:.24em; color:rgba(223,246,255,.5); min-height:14px; }
+  #summary b{ color:var(--am); font-weight:700; }
+  #summary i{ font-style:normal; color:var(--gn); }
   .rowlbl{ font-size:9.5px; letter-spacing:.3em; color:rgba(223,246,255,.4); margin:14px 0 8px; }
   .rowlbl:first-child{ margin-top:0; }
   .rowlbl.dim{ color:rgba(223,246,255,.28); letter-spacing:.2em; margin-top:16px; }
@@ -521,9 +524,10 @@
         <div class="rowlbl dim">Drift to fill the boost meter · gamepad supported · Esc pauses</div>
       </div>
     </div>
+    <!-- what you are about to drive, whichever tab is open -->
+    <div id="summary"></div>
     <button class="btn" id="go">START ENGINE</button>
     <button class="dbtn hide" id="abandon">ABANDON CUP</button>
-    <div class="hint">DRIFT TO FILL THE BOOST METER · GAMEPAD SUPPORTED</div>
   </div>
 </div>
 
@@ -3694,12 +3698,24 @@ document.addEventListener('visibilitychange', () => {
 document.querySelectorAll('#diff .dbtn').forEach(b => b.addEventListener('click', () => {
   document.querySelectorAll('#diff .dbtn').forEach(x => x.classList.remove('sel'));
   b.classList.add('sel'); diff = +b.dataset.d;
+  refreshSummary();
 }));
 
 /* ---- circuit seeding ---- */
 const seedIn = $('seedin'), trackInfoEl = $('trackinfo');
 
+function refreshSummary() {
+  const t = trackInfo, sep = ' · ';
+  const live = mode === 'cup' && Cup.active && !Cup.done;
+  const where = live ? `CUP <b>${Cup.data.seed}</b>${sep}ROUND <b>${Cup.data.round + 1}</b>/${CUP_ROUNDS}${sep}${t.seed}`
+              : mode === 'cup' ? `CUP <b>${cleanSeed(seedIn.value)}</b>${sep}ROUND 1 ON ${t.seed}`
+              : `<b>${t.seed}</b>${sep}${(t.length / 1000).toFixed(2)} KM`;
+  const pb = Records.best(t.seed);
+  $('summary').innerHTML = `${where}${sep}${DIFF[diff].name}${sep}${t.time}${sep}${t.weather}` +
+    (pb ? `${sep}RECORD <i>${fmt(pb)}</i>` : '');
+}
 function showTrackInfo() {
+  refreshSummary();
   const t = trackInfo;
   const pb = Records.best(SEED);
   $('pbtime').textContent = pb ? fmt(pb) : '--:--.---';
