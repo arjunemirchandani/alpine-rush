@@ -1943,6 +1943,133 @@ function buildBridges() {
   }
 }
 
+/* ---------------------------- 9d. galleries ---------------------------- */
+/* An avalanche gallery: a concrete roof over the road, a solid wall on the
+   mountain side, square pillars on a sill on the valley side. Like the
+   tunnel its interior is unlit and baked - but with the hour's actual sun:
+   at build time every interior vertex casts a ray at the sun and asks
+   whether it escapes between the pillars, over the sill, under the roof's
+   edge or out an end. So the floor carries real sun stripes at the angle
+   of the day, faint in a blizzard, none when the sun is on the mountain
+   side; the roof and pillars cast the same stripes onto the cars live. */
+function galleryLight(f, s, x, h, L, sunK) {                 // x: lateral, + toward the open side
+  const G = GALLERY;
+  const sky = 0.10 + 0.32 * smooth(-G.w, G.w, x)
+            + 0.35 * (Math.exp(-(s - f.s0) / 20) + Math.exp(-(f.s1 - s) / 20));
+  let sun = 0;
+  if (L.ly > 0.02 && h < G.hOpen - 0.05) {
+    const roofU = lerp(G.hClosed, G.hOpen, (x + G.w) / (2 * G.w));
+    let tMin = (roofU - h) / L.ly, exit = 'roof';            // the roof stops it unless something opens first
+    if (L.ls > 1e-3 || L.ls < -1e-3) {
+      const tEnd = ((L.ls > 0 ? f.s1 : f.s0) - s) / L.ls;
+      if (tEnd < tMin) { tMin = tEnd; exit = 'end'; }
+    }
+    if (L.lx > 1e-3) {
+      const tEdge = (G.w - x) / L.lx;
+      if (tEdge < tMin) { tMin = tEdge; exit = 'edge'; }
+    } else if (L.lx < -1e-3) {
+      const tWall = (-G.w - x) / L.lx;
+      if (tWall < tMin) { tMin = tWall; exit = 'wall'; }
+    }
+    if (exit === 'end') sun = sunK;
+    else if (exit === 'edge') {
+      const hE = h + L.ly * tMin, sE = s + L.ls * tMin;
+      const m = (((sE - f.s0 - G.pillarEvery / 2) % G.pillarEvery) + G.pillarEvery) % G.pillarEvery;
+      const pillar = m < G.pillar / 2 || m > G.pillarEvery - G.pillar / 2;
+      if (hE > G.sill && hE < G.hOpen && !pillar) sun = sunK;
+    }
+  }
+  return sky + sun;
+}
+/** loft a profile along the road at a fixed arc-length step (finer than the
+    centreline samples, for the floor's stripes); color(s, lat, h) */
+function loftS(s0, s1, step, prof, color) {
+  const rows = Math.max(2, Math.ceil((s1 - s0) / step) + 1), m = prof.length;
+  const pos = new Float32Array(rows * m * 3), uv = new Float32Array(rows * m * 2), col = new Float32Array(rows * m * 3);
+  const idx = new Uint32Array((rows - 1) * (m - 1) * 6);
+  let o = 0;
+  for (let r = 0; r < rows; r++) {
+    const sl = lerp(s0, s1, r / (rows - 1)), a = atDist(sl);
+    const ax = a.x, ay = a.y, az = a.z, rx = a.rx, rz = a.rz;
+    for (let k = 0; k < m; k++) {
+      const [l, h] = prof[k], v = r * m + k;
+      pos[v * 3] = ax + rx * l; pos[v * 3 + 1] = ay + h; pos[v * 3 + 2] = az + rz * l;
+      uv[v * 2] = k / (m - 1); uv[v * 2 + 1] = sl / 34;
+      const c = color(sl, l, h); col[v * 3] = c[0]; col[v * 3 + 1] = c[1]; col[v * 3 + 2] = c[2];
+      if (r < rows - 1 && k < m - 1) {
+        idx[o++] = v; idx[o++] = v + m; idx[o++] = v + 1;
+        idx[o++] = v + 1; idx[o++] = v + m; idx[o++] = v + m + 1;
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setIndex(new THREE.BufferAttribute(idx, 1));
+  g.computeVertexNormals();
+  return g;
+}
+function buildGalleries() {
+  const G = GALLERY, out = G.w + G.shell;
+  const litMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const bakedMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  const floorMat = new THREE.MeshBasicMaterial({ map: asphaltTex, vertexColors: true });
+  const lineMat = new THREE.MeshBasicMaterial({ color: 0xc9d2e0, side: THREE.DoubleSide });
+  const pillarMat = new THREE.MeshLambertMaterial({ color: 0x9da3ab });
+  const snow = [0.93, 0.95, 0.98], face = [0.55, 0.57, 0.61], concrete = [0.42, 0.44, 0.48];
+  const pillarGeo = new THREE.BoxGeometry(G.pillar, G.hOpen, G.pillar);
+  const M = new THREE.Matrix4(), P = new THREE.Vector3(), Qt = new THREE.Quaternion(), S = new THREE.Vector3(1, 1, 1);
+  const sunV = new THREE.Vector3(TOD.off[0], TOD.off[1], TOD.off[2]).normalize();
+  const sunK = 1.7 * (TOD.sunI / 2.45) * WX.sunK;
+
+  for (const f of FEATURES) {
+    if (f.type !== 'gallery') continue;
+    const o = f.open;
+    // the sun in the gallery's frame at arc length s: lx toward the open side, ls along the road
+    const sunAt = sl => { const a = atDist(sl); return { lx: o * (sunV.x * a.rx + sunV.z * a.rz), ly: sunV.y, ls: sunV.x * a.tx + sunV.z * a.tz }; };
+    const baked = base => (i, l, h) => {
+      const sl = CUM[i], k = galleryLight(f, sl, o * l, h, sunAt(sl), sunK);
+      return [base[0] * k, base[1] * k, base[2] * k];
+    };
+    // roof: snow on top, a concrete edge face at the open side; casts the shade
+    const roofTop = new THREE.Mesh(loftTrack(f.i0, f.i1,
+      [[-o * out, G.hClosed + G.slab], [o * out, G.hOpen + G.slab], [o * out, G.hOpen]],
+      (i, l, h) => (o * l > G.w && h < G.hOpen + G.slab - 0.01) ? face : snow), litMat);
+    roofTop.castShadow = true; roofTop.receiveShadow = true;
+    world.add(roofTop);
+    // underside and the wall's inner face: sky light only, brighter toward the openings
+    world.add(new THREE.Mesh(loftTrack(f.i0, f.i1, [[o * out, G.hOpen], [-o * G.w, G.hClosed]], baked(concrete)), bakedMat));
+    world.add(new THREE.Mesh(loftTrack(f.i0, f.i1, [[-o * G.w, 0], [-o * G.w, G.hClosed]], baked(concrete)), bakedMat));
+    // the sill between the pillars, lit like any other concrete
+    world.add(new THREE.Mesh(loftTrack(f.i0, f.i1,
+      [[o * G.w, 0.08], [o * G.w, G.sill], [o * out, G.sill], [o * out, 0.08]], () => face), litMat));
+    // end faces: the roof slab's and the wall's
+    for (const i of [f.i0, f.i1]) {
+      const endMat = new THREE.MeshLambertMaterial({ color: 0x8b9099, side: THREE.DoubleSide });
+      world.add(new THREE.Mesh(ringAt(i, [[-o * out, G.hClosed + G.slab], [o * out, G.hOpen + G.slab]], [[-o * G.w, G.hClosed], [o * out, G.hOpen]]), endMat));
+      world.add(new THREE.Mesh(ringAt(i, [[-o * out, 0], [-o * out, G.hClosed]], [[-o * G.w, 0], [-o * G.w, G.hClosed]]), endMat));
+    }
+    // pillars every 8 m on the open side, up through the sill to the roof
+    const ss = []; for (let sl = f.s0 + G.pillarEvery / 2; sl < f.s1 - 2; sl += G.pillarEvery) ss.push(sl);
+    const pillars = new THREE.InstancedMesh(pillarGeo, pillarMat, ss.length);
+    ss.forEach((sl, k) => {
+      const a = atDist(sl);
+      P.set(a.x + a.rx * o * (G.w + G.shell / 2), a.y + G.hOpen / 2, a.z + a.rz * o * (G.w + G.shell / 2));
+      Qt.setFromAxisAngle(UP, Math.atan2(a.tx, a.tz));
+      M.compose(P, Qt, S); pillars.setMatrixAt(k, M);
+    });
+    pillars.instanceMatrix.needsUpdate = true; pillars.castShadow = true;
+    world.add(pillars);
+    // the floor: the sun's stripes, sampled every 0.7 m along and 9 columns across
+    const cols = []; for (let k = 0; k < 9; k++) cols.push([-G.w + k * (2 * G.w / 8), 0.08]);
+    world.add(new THREE.Mesh(loftS(f.s0, f.s1, 0.7, cols,
+      (sl, l, h) => { const k = galleryLight(f, sl, o * l, h, sunAt(sl), sunK); return [k, k, k]; }), floorMat));
+    for (const side of [1, -1])
+      world.add(new THREE.Mesh(loftTrack(f.i0, f.i1, [[side * (HALF_W - 0.75), 0.10], [side * (HALF_W - 0.15), 0.10]]), lineMat));
+  }
+}
+
 /* One call rebuilds the entire circuit from a seed string. */
 let trackInfo = null;
 let timeChoice = -1;                       // -1 = follow the seed
@@ -1964,6 +2091,7 @@ function loadTrack(seedStr) {
   buildScenery();
   buildTunnels();
   buildBridges();
+  buildGalleries();
   return trackInfo;
 }
 
