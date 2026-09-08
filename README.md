@@ -388,12 +388,14 @@ than steering through the slide; and planning more corner speed buys nothing, be
 sits at the car's grip ceiling.
 
 Technique alone was worth 2 %; a player who drifts for profit is 15 % up on ACE. So LEGEND also
-carries a **declared handicap** — its rivals' cars run **+10 %** in top speed, engine, grip and
-steering — and the CONDITIONS tab says so in as many words. Finding the right handicap was its own
+carries a **declared handicap** — its rivals' cars run **+20 %** in top speed, engine, grip and
+steering, and the snow slows them less — and the CONDITIONS tab says so in as many words. Finding the right handicap was its own
 lesson: +10 % top speed alone bought under 1 % (the AI rarely reaches the ceiling), and grip alone
 sent the rivals off the road, because in this drift model a corner's speed is set by *yaw rate*, not
 grip. With steering authority included, +10 % laps 5 % faster than ACE with no more off-track,
-+15 % about 7 %, +20 % about 8 %. The number is one constant (`LEGEND_HANDICAP`) if it needs to grow.
++15 % about 7 %, +20 % about 8 %; softening the off-track penalty for those cars adds another 1 %.
+The number is one constant (`LEGEND_HANDICAP`) if it needs to grow — a player who drifts for profit
+was still 15 % up on ACE, so LEGEND at +20 % is a race, not a wall.
 
 ### Weather
 
