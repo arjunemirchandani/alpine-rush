@@ -919,6 +919,8 @@ function generateTrack(seedStr) {
    least one (6% draw neither); a few get two tunnels. */
 const F_NONE = 0, F_TUNNEL = 1, F_BRIDGE = 2;
 const FEAT = new Int8Array(N);
+const FEAT_K = new Float32Array(N);                   // structure strength along the track: 0 at its ends, 1 inside
+const STRUCT_RAMP = 25;                                // metres over which a structure's terrain arrives
 let FEATURES = [];
 const STRUCT = {
   tunnel: { len: [130, 230], min: 90, kap: 0.0075, grade: 1 },      // a bore can climb; it just can't bend hard
@@ -927,7 +929,7 @@ const STRUCT = {
   startClear: [80, 90]                                               // metres kept free behind / ahead of the line (the grid ends at 55)
 };
 function placeFeatures() {
-  FEAT.fill(F_NONE); FEATURES = [];
+  FEAT.fill(F_NONE); FEAT_K.fill(0); FEATURES = [];
   const rnd = mulberry32(strSeed(SEED + '#T'));
   rnd(); rnd(); rnd();
   const uT = rnd(), uB = rnd();
@@ -964,7 +966,10 @@ function placeFeatures() {
     if (!placed) continue;
     FEATURES.push(placed);
     const code = type === 'tunnel' ? F_TUNNEL : F_BRIDGE;
-    for (let i = placed.i0; i <= placed.i1; i++) FEAT[i] = code;
+    for (let i = placed.i0; i <= placed.i1; i++) {
+      FEAT[i] = code;
+      FEAT_K[i] = smooth(0, STRUCT_RAMP, Math.min(CUM[i] - placed.s0, placed.s1 - CUM[i]));
+    }
     for (let i = 0; i < N; i++) {                                    // and keep the next one at arm's length
       const d = Math.min(Math.abs(CUM[i] - placed.s0), Math.abs(CUM[i] - placed.s1));
       if ((i >= placed.i0 && i <= placed.i1) || d < STRUCT.gap) taken[i] = 1;
@@ -1054,9 +1059,9 @@ function mountainH(x, z, baseY) {
   // strictly additive: the valley floor can never sink below the road
   return baseY + 8 + 340 * ridge * (0.28 + 0.72 * roll) + 30 * det * ridge + 28 * roll;
 }
-/** drivable surface height. `sub` digs the mesh under the road slab. */
-function heightAt(x, z, hint, sub) {
-  const q = hint === undefined ? nearGlobal(x, z) : nearLocal(x, z, hint, 30);
+/** the ground as the road knows it: tarmac, berm, then mountain. `sub` digs
+    the mesh under the road slab. */
+function groundFrom(q, x, z, sub) {
   const t = Math.abs(q.lat) - HALF_W;
   if (t <= 0) return q.y - (sub ? 0.4 : 0);
   const berm = q.y + bankProfile(t);
@@ -1065,6 +1070,34 @@ function heightAt(x, z, hint, sub) {
   const open = 55 + 135 * (0.5 + 0.5 * fbm((x + TRACK.noise[0]) * 0.0021 + 2.3,
                                             (z + TRACK.noise[1]) * 0.0021 - 4.7, 2));
   return lerp(berm, mountainH(x, z, q.y), smooth(22, 22 + open, t));
+}
+/** drivable surface height: what a car, the camera and the ghost stand on.
+    A structure never changes it - the road runs through the hill and over
+    the ravine at exactly the height the curve gave it. */
+function heightAt(x, z, hint, sub) {
+  const q = hint === undefined ? nearGlobal(x, z) : nearLocal(x, z, hint, 30);
+  return groundFrom(q, x, z, sub);
+}
+/* what the mountain does, as opposed to what the car stands on. The same
+   surface everywhere except where a structure parts them: a hill caps a
+   tunnel (a paraboloid ridge across the corridor, high enough to bury the
+   bore), a ravine opens under a bridge (a side valley crossing the road,
+   shallowing into the mountainside to either side). FEAT_K ramps both in
+   from the structure's ends, so a portal emerges from its hill as a short
+   exposed gallery and a deck's abutments rest on real ground. */
+const TUNNEL_CAP = { h: 15, w: 34 };                  // ridge height over the road, half-width where it meets the ground
+const BRIDGE_GORGE = { depth: 40, w0: 60, w1: 150 };  // ravine depth; lateral fade into the mountainside
+function terrainAt(x, z, hint) {
+  const q = hint === undefined ? nearGlobal(x, z) : nearLocal(x, z, hint, 30);
+  const base = groundFrom(q, x, z, true);
+  const f = FEAT[q.i], k = FEAT_K[q.i];
+  if (!f || k <= 0) return base;
+  if (f === F_TUNNEL) {
+    const u = q.lat / TUNNEL_CAP.w;
+    return Math.max(base, q.y + TUNNEL_CAP.h * k * Math.max(0, 1 - u * u));
+  }
+  const gorge = q.y - BRIDGE_GORGE.depth * k;
+  return lerp(base, Math.min(base, gorge), 1 - smooth(BRIDGE_GORGE.w0, BRIDGE_GORGE.w1, Math.abs(q.lat)));
 }
 
 /* ------------------------- 5. renderer / scene ------------------------- */
@@ -1357,7 +1390,7 @@ function buildTerrain() {
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
     const k = (j * n + i) * 3;
     const x = (i / SEGS - 0.5) * SIZE, z = (j / SEGS - 0.5) * SIZE;
-    pos[k] = x; pos[k + 1] = heightAt(x, z, undefined, true); pos[k + 2] = z;
+    pos[k] = x; pos[k + 1] = terrainAt(x, z); pos[k + 2] = z;
   }
   /* Bake sun occlusion into the mesh: march each vertex toward the sun over the
      height grid and see if a ridge gets in the way. Long shadows off the peaks
@@ -1474,14 +1507,17 @@ function buildRoad() {
   world.add(new THREE.Mesh(ribbon(() => -HALF_W + 0.15, () => -HALF_W + 0.75, () => 0.05), lineMat));
 
   // snow banks (three-row ribbon that melts into the terrain mesh)
+  // (collapsed to zero width through a tunnel or over a bridge: there the
+  // road has walls and air beside it, not snow)
   const snowMat = new THREE.MeshLambertMaterial({ color: 0xeef5ff });
   for (const side of [1, -1]) {
+    const edge = i => side * HALF_W;
     world.add(new THREE.Mesh(
-      ribbon(() => side * HALF_W, () => side * (HALF_W + 9), (i, l) => bankProfile(Math.abs(l) - HALF_W) + 0.04),
+      ribbon(edge, i => FEAT[i] ? edge(i) : side * (HALF_W + 9), (i, l) => bankProfile(Math.abs(l) - HALF_W) + 0.04),
       snowMat));
     world.add(new THREE.Mesh(
-      ribbon(() => side * (HALF_W + 9), () => side * (HALF_W + 25),
-        (i, l) => heightAt(PX[i] + RX[i] * l, PZ[i] + RZ[i] * l, i) - PY[i] + 0.22),
+      ribbon(i => FEAT[i] ? edge(i) : side * (HALF_W + 9), i => FEAT[i] ? edge(i) : side * (HALF_W + 25),
+        (i, l) => FEAT[i] ? 0.04 : terrainAt(PX[i] + RX[i] * l, PZ[i] + RZ[i] * l, i) - PY[i] + 0.22),
       snowMat));
   }
 }
@@ -1554,10 +1590,12 @@ function buildScenery() {
       const r2 = hash2(gz * 3 + 91, gx * 5 + 17);
       const x = gx + (r - 0.5) * STEP * 1.6, z = gz + (r2 - 0.5) * STEP * 1.6;
       const q = nearGlobal(x, z);
-      if (Math.abs(q.lat) - HALF_W < 26) continue;            // keep the racing corridor clear
-      const y = heightAt(x, z);
+      const y = terrainAt(x, z);
+      // keep the racing corridor clear - unless the corridor is buried: the
+      // hill over a tunnel takes trees like any other slope
+      if (Math.abs(q.lat) - HALF_W < 26 && y - q.y < 9) continue;
       // local slope — pines need something they can actually cling to
-      const slope = Math.hypot(heightAt(x + 9, z) - y, heightAt(x, z + 9) - y) / 9;
+      const slope = Math.hypot(terrainAt(x + 9, z) - y, terrainAt(x, z + 9) - y) / 9;
       const dens = fbm((x + TRACK.noise[0]) * 0.0031 + 1.7, (z + TRACK.noise[1]) * 0.0031 - 2.9, 3);
       const treeChance = clamp(0.74 + dens * 0.9 - smooth(120, 250, y) - smooth(0.6, 1.5, slope), 0, 1);
       if (r2 < treeChance) {
@@ -1572,6 +1610,7 @@ function buildScenery() {
   }
   // trackside marker poles
   for (let i = 0; i < N; i += 26) {
+    if (FEAT[i]) continue;                                    // no berm to stand on through a structure
     for (const side of [1, -1]) {
       const l = side * (HALF_W + 4.2);
       poles.push([PX[i] + RX[i] * l, PY[i] + bankProfile(4.2), PZ[i] + RZ[i] * l]);
@@ -4458,7 +4497,7 @@ window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, S
                   driveTest, DRIVE, Records, Ghost, LapTrace, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
                   TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; },
-                  get FEATURES() { return FEATURES; }, FEAT, STRUCT, placeFeatures };
+                  get FEATURES() { return FEATURES; }, FEAT, FEAT_K, STRUCT, placeFeatures, terrainAt, TUNNEL_CAP, BRIDGE_GORGE };
 </script>
 </body>
 </html>
