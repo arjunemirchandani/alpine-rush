@@ -2488,11 +2488,11 @@ class Car {
 
     // ---- stuck-in-the-snow rescue
     if (!onTrack && this.speed < 6) this.offTime += dt; else this.offTime = 0;
-    if (this.offTime > 3.2) { this.respawn(); this.offTime = 0; }
+    if (this.offTime > 3.2 && !this.rehearsing) { this.respawn(); this.offTime = 0; }   // a rehearsal never teleports
   }
 
   onLap() {
-    if (this.finished) return;
+    if (this.finished || this.rehearsing) return;         // a rehearsed crossing is not a lap
     const now = Game.raceTime;
     if (this.laps > 0) {
       const lt = now - this.lapStart;
@@ -2549,6 +2549,39 @@ class Car {
                      'lapStart','offTime','driftHold','tow',
                      'boostTimer','boostRefused','boostDenied']) this[f] = k[f];
     this.lastSkid = [null, null];
+  }
+
+  /* ---- rehearsal. Run this car alone under a scripted control for a
+     horizon, score where it got to, put everything back. It is the same
+     step() the race runs, so the prediction is the physics itself, not a
+     model of it; the other cars stand still, which is what replanning every
+     few tenths absorbs. Score is metres of progress, plus exit speed valued
+     over the next second, minus time in the snow, plus boost banked. ---- */
+  steerTo(off, driftK = 0.55) {
+    const look = clamp(10 + this.speed * 0.66, 16, 64);
+    const a = atDist(this.s + look);
+    const o = clamp(off, -(HALF_W - 2.2), HALF_W - 2.2);
+    const tx = a.x + a.rx * o, tz = a.z + a.rz * o;
+    const ang = wrapPi(Math.atan2(tx - this.pos.x, tz - this.pos.z) - this.yaw);
+    return clamp(ang * 2.5 - this.drift * driftK, -1, 1);
+  }
+  rehearse(script, horizon = REH.horizon, dt = REH.dt) {
+    const snap = this.snapshot(), s0 = this.s, laps0 = this.laps, meter0 = this.boostMeter;
+    this.rehearsing = true;
+    const c = this.ctl;
+    let off = 0, t = 0;
+    while (t < horizon) {
+      script(t, this, c);
+      this.step(dt, true);
+      if (!this.onTrack) off += dt;
+      t += dt;
+    }
+    const gained = (this.laps - laps0) * TOTAL + this.s - s0;
+    const score = gained + this.speed * REH.speedW - off * REH.offW + (this.boostMeter - meter0) * REH.boostW;
+    const out = { score, gained, speed: this.speed, off, meter: this.boostMeter };
+    this.rehearsing = false;
+    this.restore(snap);
+    return out;
   }
 
   /* ---------- AI ---------- */
@@ -2799,6 +2832,11 @@ const DIFF = [
   { name: 'ACE',    skill: 1.00, speed: 1.05, tech: 0, handicap: 0 },
   { name: 'LEGEND', skill: 1.00, speed: 1.05, tech: 1, handicap: LEGEND_HANDICAP }
 ];
+/* rehearsal: horizon and step of each trial, and what the score values.
+   speedW: a metre of score per m/s of exit speed (roughly, what that speed
+   is worth over the next second). offW: metres of score lost per second in
+   the snow. boostW: metres per full meter banked. */
+const REH = { horizon: 2.0, dt: 1 / 120, speedW: 1.0, offW: 30, boostW: 8 };
 const TECH = { fill: 0, exit: 1, lat: 1.0, brake: 0.70, brakeHi: 0.70, fillMax: 0.72, fillRoom: 2.5, hold: 0.22, band: 1, look: 1.0, planPow: 1, offH: 2, avoidK: 1, aiCollide: 1, boostH: 0 };   // planPow 2 over-plans and runs wide; offH softens the snow for a handicapped car
 let diff = 1;
 
@@ -4192,7 +4230,7 @@ requestAnimationFrame(() => {
 //   __rush.Perf.bench()            -> 40 forced frames, ms each: compare before and after a change
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
-                  driveTest, DRIVE, Records, Ghost, LapTrace, Cup, Perf, buildCar, CLASSES, DIFF, TECH,
+                  driveTest, DRIVE, Records, Ghost, LapTrace, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
                   TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
 </script>
