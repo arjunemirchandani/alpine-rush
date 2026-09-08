@@ -1003,8 +1003,25 @@ function applyTimeOfDay(i) {
   skyTex = tex;
   skyDome.material.map = tex;
   skyDome.material.needsUpdate = true;
+  bakeCarEnv();
 }
 let skyTex = null;
+
+/* ---- what the paint reflects: the sky dome, prefiltered once per hour or
+   weather change into a small PMREM and handed to every car material that
+   asked for it. Golden hour glows on the bodywork; a blizzard goes flat. ---- */
+let carEnv = null, pmremGen = null;
+const ENV_MATS = new Set();
+const envScene = new THREE.Scene();
+function bakeCarEnv() {
+  if (!pmremGen) pmremGen = new THREE.PMREMGenerator(renderer);
+  envScene.add(skyDome);                                       // borrow it; fog:false, so it renders flat
+  const rt = pmremGen.fromScene(envScene, 0.04);
+  scene.add(skyDome);
+  if (carEnv) carEnv.dispose();
+  carEnv = rt.texture;
+  for (const m of ENV_MATS) { m.envMap = carEnv; m.needsUpdate = true; }
+}
 
 /* ---- weather: dealt per seed on top of the hour, never part of the circuit.
    fogK scales the hour's fog distances (WHITEOUT sets its own), sunK/hemiK
@@ -1038,6 +1055,7 @@ function applyWeather(i) {
   skyDome.material.color.setHex(WX.skyTint);
   const map = WX.flatSky ? null : skyTex;                      // a whiteout has no sky, only fog
   if (skyDome.material.map !== map) { skyDome.material.map = map; skyDome.material.needsUpdate = true; }
+  bakeCarEnv();
   snowGeo.setDrawRange(0, WX.flakes);
   // against the near-white sky a blizzard brings, pure white flakes vanish;
   // real snow reads as grey specks on an overcast sky, so the heavier the
@@ -1486,10 +1504,13 @@ function chamferBox(sx, sy, sz, r) {
 
 function buildCar(color, accent) {
   const g = new THREE.Group();
-  const paint = new THREE.MeshStandardMaterial({ color, roughness: 0.34, metalness: 0.62 });
+  // paint is a metallic base under a hard clearcoat, and it reflects the sky
+  const paint = new THREE.MeshPhysicalMaterial({ color, roughness: 0.42, metalness: 0.55,
+    clearcoat: 1, clearcoatRoughness: 0.08, envMap: carEnv, envMapIntensity: 0.9 });
   const dark  = new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 0.55, metalness: 0.4 });
-  const glass = new THREE.MeshStandardMaterial({ color: 0x0d2233, roughness: 0.08, metalness: 0.92 });
-  const trim  = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.3, metalness: 0.7 });
+  const glass = new THREE.MeshStandardMaterial({ color: 0x0d2233, roughness: 0.06, metalness: 0.92, envMap: carEnv, envMapIntensity: 1.2 });
+  const trim  = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.3, metalness: 0.7, envMap: carEnv });
+  ENV_MATS.add(paint); ENV_MATS.add(glass); ENV_MATS.add(trim);
 
   const add = (geo, mat, x, y, z, sx, sy, sz) => {
     const m = new THREE.Mesh(geo, mat);
@@ -1512,7 +1533,8 @@ function buildCar(color, accent) {
     add(box, dark, side * 0.84, 0.94, 0.74, 0.16, 0.04, 0.04);     // stalk
   }
   const pipeGeo = new THREE.CylinderGeometry(0.07, 0.08, 0.30, 10); pipeGeo.rotateX(Math.PI / 2);
-  const chrome = new THREE.MeshStandardMaterial({ color: 0xb8bec8, roughness: 0.25, metalness: 1 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xb8bec8, roughness: 0.25, metalness: 1, envMap: carEnv });
+  ENV_MATS.add(chrome);
   add(pipeGeo, chrome, -0.62, 0.42, -2.20); add(pipeGeo, chrome, -0.44, 0.42, -2.20);
   add(pipeGeo, chrome,  0.62, 0.42, -2.20); add(pipeGeo, chrome,  0.44, 0.42, -2.20);
   add(box, dark, 0, 0.40, -2.12, 1.30, 0.10, 0.22);                // diffuser
@@ -1534,7 +1556,8 @@ function buildCar(color, accent) {
   wgeo.rotateZ(Math.PI / 2);
   const wmat = new THREE.MeshStandardMaterial({ color: 0x121317, roughness: 0.9 });
   const rimGeo = new THREE.CylinderGeometry(0.26, 0.26, 0.36, 10); rimGeo.rotateZ(Math.PI / 2);
-  const rimMat = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.25, metalness: 0.9 });
+  const rimMat = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.25, metalness: 0.9, envMap: carEnv });
+  ENV_MATS.add(rimMat);
   const wheels = [];
   for (const [x, z, front] of [[-0.98, 1.42, 1], [0.98, 1.42, 1], [-1.00, -1.40, 0], [1.00, -1.40, 0]]) {
     const pivot = new THREE.Group(); pivot.position.set(x, 0.44, z);
