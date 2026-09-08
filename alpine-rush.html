@@ -214,6 +214,14 @@
          clip-path:polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px); }
   .lbtn.sel{ outline:2px solid #fff; outline-offset:2px; }
   #carblurb{ min-height:12px; }
+  #carstats{ display:flex; gap:18px; justify-content:center; flex-wrap:wrap; margin-top:10px; }
+  .stat{ display:flex; flex-direction:column; align-items:center; gap:4px; min-width:62px; }
+  .stat .sl{ font-size:8.5px; letter-spacing:.24em; color:rgba(223,246,255,.45); }
+  .stat .pips{ display:flex; gap:3px; }
+  .stat .pips i{ width:9px; height:5px; background:rgba(53,230,255,.14); border:1px solid rgba(53,230,255,.22); }
+  .stat .pips i.on{ background:var(--cy); border-color:var(--cy); box-shadow:0 0 6px rgba(53,230,255,.6); }
+  .stat .pips i.hi{ background:var(--am); border-color:var(--am); box-shadow:0 0 6px rgba(255,204,51,.6); }
+  #title.showcase .stat .sl{ text-shadow:0 1px 6px rgba(0,0,0,.8); }
   #title.showcase{ backdrop-filter:none; background:radial-gradient(ellipse at 50% 40%, rgba(9,20,38,.18), rgba(3,5,10,.62)); }
   #title.showcase .card::after{ background:rgba(6,14,24,.22); }
   #title.showcase .card::before{ background:rgba(53,230,255,.22); }
@@ -524,6 +532,7 @@
         <div id="carstage"></div>
         <div class="rowlbl">Body</div>
         <div id="styles"></div>
+        <div id="carstats"></div>
         <div class="rowlbl">Livery</div>
         <div id="liveries"></div>
         <div id="carblurb" class="rowlbl dim"></div>
@@ -3945,16 +3954,30 @@ if (!LIVERIES[look.livery]) look.livery = 0;
 function colorDist(a, b) {
   return Math.hypot((a >> 16) - (b >> 16), ((a >> 8) & 255) - ((b >> 8) & 255), (a & 255) - (b & 255));
 }
+/* five pips per attribute, three meaning "the GT", one step per attribute-
+   sized notch of multiplier either way, so a balanced car reads as balanced
+   and a specialist reads as one. The weather line reads off wx, lower better. */
+const STAT_KEYS = [['top', 'SPEED', 0.02], ['accel', 'ACCEL', 0.03], ['grip', 'GRIP', 0.03],
+                   ['boost', 'BOOST', 0.05], ['off', 'OFF-ROAD', 0.08], ['wx', 'WEATHER', 0.12]];
+function statPips(style) {
+  return STAT_KEYS.map(([k, label, step]) => {
+    const v = k === 'wx' ? 2 - CLASSES[style][k] : CLASSES[style][k];
+    const n = clamp(3 + Math.round((v - 1) / step), 1, 5);
+    return `<div class="stat"><div class="pips">${[1, 2, 3, 4, 5].map(i =>
+      `<i class="${i <= n ? (n === 5 ? 'hi' : 'on') : ''}"></i>`).join('')}</div><div class="sl">${label}</div></div>`;
+  }).join('');
+}
 function applyLook(save = true) {
   const L = LIVERIES[look.livery];
   player.setLook(look.style, L.color, L.accent);
+  $('carstats').innerHTML = statPips(look.style);
   for (const r of rivals) {
     const want = colorDist(r.base, L.color) < 90 ? r.alt : r.base;
     if (r.color !== want) r.setLook(r.style, want, r.accent);
   }
   document.querySelectorAll('.sbtn').forEach(b => b.classList.toggle('sel', b.dataset.style === look.style));
   document.querySelectorAll('.lbtn').forEach(b => b.classList.toggle('sel', +b.dataset.livery === look.livery));
-  $('carblurb').textContent = `${STYLE_INFO[look.style].blurb} · ${L.name}`;
+  $('carblurb').textContent = `${CLASSES[look.style].tag} · ${L.name}`;
   if (save) Records.setPref('look', look);
 }
 $('styles').innerHTML = Object.keys(STYLES).map(k =>
