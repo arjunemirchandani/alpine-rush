@@ -175,7 +175,7 @@ regenerate together.
 The title card reports what you're about to drive:
 
 ```
-2.29 KM · 11 CORNERS · TIGHTEST 48M · 42% FLAT OUT · TECHNICAL · 3 DRAWS
+2.29 KM · 11 CORNERS · TIGHTEST 48M · 42% FLAT OUT · TECHNICAL · 2 TUNNELS · BRIDGE · 3 DRAWS
 ```
 
 ### Why every seed is drivable
@@ -346,6 +346,40 @@ materials **and any texture the material owns**, since `material.dispose()` does
 and that leaks one per rebuild — then rebuilds terrain, road, kerbs, banks, gantry and scenery.
 Sky, lights, shared textures, cars and HUD are track-independent and survive untouched.
 Verified at 12 consecutive rebuilds with zero growth in geometry or texture count.
+
+### Tunnels and bridges
+
+Most circuits carry a structure or two: a bore through the mountain, a viaduct over a ravine. They
+are dealt off their own stream (`SEED+'#T'`, like the hour and the weather) **onto** the accepted
+curve, never into it — the centreline, the drive test and every seed's circuit are exactly what they
+were before structures existed. 0–2 tunnels (20/50/30%) and 0–1 bridge (30/70%), so about one circuit
+in sixteen has neither; `ALPINE` always gets one of each. A tunnel wants a stretch that doesn't bend
+hard (radius over ~130 m) and may climb; a bridge wants a level one. Both keep clear of the grid and
+of each other, and shrink in 20 m steps if a straight that long doesn't exist. Over 40 seeds every
+dealt structure found room.
+
+Until now the terrain was *defined from* the road — the mountain is strictly additive above it — so
+nothing could rise over the tarmac or fall away beneath it. Structures split that in two: what the
+cars stand on (`heightAt`, unchanged) and what the mountain does (`terrainAt`). A tunnel is capped by
+a 15 m ridge across the corridor, a bridge crosses a 40 m ravine that shallows into the mountainside
+to either side, and both ramp in over the first 25 m so a portal emerges from its hill as a short
+gallery and a deck's abutments rest on real ground.
+
+The bore is a horseshoe lofted along the curve, unlit, its light baked into vertex colours — a low
+ambient, daylight spilling in from both portals, a warm pool under each lamp every 12 m — so it is
+dark at noon and dark at dusk and costs nothing per frame. The shell casts a shadow, so the sun leaves
+your car as you enter; a convolver brings the walls back in the engine note, and the wind drops. The
+deck is a box girder with parapets, rails and wall piers down to the ravine floor. Through either,
+the snow wall moves in from 22 m to the road's edge: the car's centre stops at 10.45 m, its flank at
+11.4, still on-track, with the same bounce and scrub as the bank. Off during the drive test, so a seed
+accepts exactly the circuit it always did; measured at PRO and LEGEND, the AI touches a wall on two
+seeds in ten, within 0.1% off-track, no respawns.
+
+One piece of shader: the 10 m terrain grid cannot rise from road level to 15 m without a triangle
+slicing through the bore, so the terrain's fragments are discarded wherever they fall inside a
+tunnel's shell. Each vertex carries its arc length, lateral offset and road height; the cut edge
+lands inside the concrete. Frame time was unchanged (0.63–0.67 ms against 0.67–0.70 on a seed with
+no structures). Draw calls: 95, was 96.
 
 ### Drift physics
 
@@ -565,6 +599,7 @@ __rush.applySeed('ZEBRA')          // rebuild the circuit in place
 __rush.Game.fastForward(105)       // simulate 105s headlessly (~120 ms)
 __rush.Perf.snapshot()             // live fps, frame ms (mean / p95), draw calls, triangles
 __rush.Perf.bench()                // 40 forced frames, ms each: compare before and after a change
+__rush.FEATURES                    // this circuit's tunnels and bridges: type, sample range, arc length
 ```
 
 Autopilot is off by default and takes effect on the next frame — no restart needed.
