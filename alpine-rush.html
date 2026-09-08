@@ -82,6 +82,15 @@
 
   /* top-left: lap + times */
   #tl{ position:absolute; top:16px; left:16px; padding:11px 16px 12px; min-width:210px; }
+  /* the mirror frame: CSS owns the rectangle, the renderer reads it each frame */
+  #mirror{
+    position:absolute; top:16px; left:50%; transform:translateX(-50%);
+    width:clamp(220px, 26vw, 420px); aspect-ratio:3.2; box-sizing:border-box;
+    border:1px solid rgba(53,230,255,.4); box-shadow:0 0 0 1px rgba(3,5,10,.6), 0 0 22px rgba(53,230,255,.12) inset;
+    display:none;
+  }
+  #mirror.on{ display:block; }
+  #mirror .lbl{ position:absolute; right:7px; bottom:4px; font-size:8.5px; letter-spacing:.3em; color:rgba(53,230,255,.55); }
   #lap{ font-size:29px; font-weight:700; line-height:1; color:#fff; text-shadow:0 0 14px rgba(53,230,255,.6); }
   #lap small{ font-size:15px; color:rgba(223,246,255,.5); font-weight:400; }
   #time{ font-size:22px; line-height:1.25; color:var(--am); text-shadow:0 0 12px rgba(255,204,51,.45); }
@@ -449,6 +458,8 @@
     </div>
   </div>
 
+  <!-- rear-view mirror: the 3D pass is blitted into this frame's rectangle -->
+  <div id="mirror"><span class="lbl">Rear</span></div>
   <div id="centre">
     <div id="count">3</div>
   </div>
@@ -549,7 +560,7 @@
           <div class="k"><kbd>A</kbd><kbd>D</kbd> Steer</div>
           <div class="k"><kbd>SPACE</kbd> Handbrake drift</div>
           <div class="k"><kbd>SHIFT</kbd> Boost</div>
-          <div class="k"><kbd>C</kbd> Camera</div>
+          <div class="k"><kbd>C</kbd> Camera · <kbd>V</kbd> Mirror</div>
           <div class="k"><kbd>R</kbd> Respawn</div>
           <div class="k"><kbd>P</kbd> Pause · <kbd>M</kbd> Mute</div>
         </div>
@@ -1005,6 +1016,56 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
+
+/* ---- rear-view mirror. A rear-facing camera mounted on the player's car
+   renders the same scene into a small target once per frame, and the target
+   is blitted, flipped like a mirror, into the frame the HUD draws. Everything
+   the world does - hour, weather, fog, slopes, rivals - is simply there,
+   because it is the same world. The shadow map is built once per frame, not
+   once per render() call. ---- */
+const MIRROR_W = 512, MIRROR_H = 160;
+const mirrorRT = new THREE.WebGLRenderTarget(MIRROR_W, MIRROR_H, { samples: 2 });
+const rearCam = new THREE.PerspectiveCamera(58, MIRROR_W / MIRROR_H, 0.6, 2500);
+const mirrorScene = new THREE.Scene();
+const mirrorQuadGeo = new THREE.PlaneGeometry(2, 2);
+{ const uv = mirrorQuadGeo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i)); }   // a mirror flips
+mirrorScene.add(new THREE.Mesh(mirrorQuadGeo, new THREE.MeshBasicMaterial({ map: mirrorRT.texture })));
+const mirrorCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+let mirrorOn = true;
+renderer.shadowMap.autoUpdate = false;
+function mirrorLive() { return mirrorOn && (Game.state === 'race' || Game.state === 'count' || Game.state === 'done'); }
+function renderMirror() {
+  const sy = Math.sin(player.yaw), cy = Math.cos(player.yaw);
+  const p = player.pos;
+  rearCam.position.set(p.x - sy * 0.6, p.y + 1.35, p.z - cy * 0.6);
+  rearCam.lookAt(p.x - sy * 40, p.y + 1.0, p.z - cy * 40);
+  const wasVisible = player.view.visible;
+  player.view.visible = false;                                // the lens is on the car; the car is not in shot
+  renderer.setRenderTarget(mirrorRT);
+  renderer.render(scene, rearCam);
+  renderer.setRenderTarget(null);
+  player.view.visible = wasVisible;
+}
+function blitMirror() {
+  // setViewport/setScissor take CSS pixels and apply the pixel ratio themselves
+  const r = $('mirror').getBoundingClientRect();
+  const x = Math.round(r.left + 1), y = Math.round(innerHeight - r.bottom + 1);
+  const w = Math.round(r.width - 2), h = Math.round(r.height - 2);
+  renderer.setViewport(x, y, w, h); renderer.setScissor(x, y, w, h); renderer.setScissorTest(true);
+  renderer.autoClear = false;
+  renderer.render(mirrorScene, mirrorCam);
+  renderer.autoClear = true;
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, innerWidth, innerHeight);
+}
+/* the whole picture: shadows once, the mirror pass, the main pass, the blit */
+function renderFrame() {
+  renderer.shadowMap.needsUpdate = true;
+  const live = mirrorLive();
+  if (live) renderMirror();
+  renderer.render(scene, camera);
+  if (live) blitMirror();
+}
 
 /* --------------------------- time of day -------------------------------
    The mountain reads completely differently depending on where the sun is.
@@ -2211,6 +2272,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyP' || e.code === 'Escape') Game.togglePause();
   if (e.code === 'KeyM') toast(Sfx.toggleMute() ? 'AUDIO MUTED' : 'AUDIO ON', 900);
   if (e.code === 'KeyC') Game.cycleCam();
+  if (e.code === 'KeyV') { mirrorOn = !mirrorOn; Records.setPref('mirror', mirrorOn); toast(mirrorOn ? 'MIRROR ON' : 'MIRROR OFF', 900, '#35e6ff'); }
   if (e.code === 'KeyR') Game.respawn();
   if (e.code === 'Enter' && Game.state === 'done') Game.advance();
 });
@@ -3905,9 +3967,9 @@ const Perf = {
     // back does, because the result cannot exist until the GPU is done
     const gl = renderer.getContext(), px = new Uint8Array(4);
     const sync = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    renderer.render(scene, camera); sync();               // warm
+    renderFrame(); sync();                                // warm
     const t0 = performance.now();
-    for (let k = 0; k < frames; k++) renderer.render(scene, camera);
+    for (let k = 0; k < frames; k++) renderFrame();       // what the game actually draws, mirror included
     sync();
     const ms = (performance.now() - t0) / frames;
     const i = renderer.info;
@@ -3986,7 +4048,8 @@ function frame() {
   }
 
   if (showcase && Game.state === 'menu' && !$('title').classList.contains('hide')) showcaseCamera(dt);
-  renderer.render(scene, camera);
+  $('mirror').classList.toggle('on', mirrorLive());
+  renderFrame();
 }
 renderer.setAnimationLoop(frame);
 
@@ -4295,6 +4358,7 @@ simReady = true;
   else if (q.get('seed')) { seedIn.value = cleanSeed(q.get('seed')); setMode('race'); }
   else setMode(Records.data.prefs.mode === 'cup' ? 'cup' : 'race');
   applyLook(false);                                  // the remembered car, on the grid
+  mirrorOn = Records.data.prefs.mirror !== false;
 }
 renderer.render(scene, camera);
 
