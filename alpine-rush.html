@@ -1624,12 +1624,20 @@ function buildStartLine() {
   beam.position.set(PX[i0], PY[i0] + 11.6, PZ[i0]);
   beam.rotation.y = -Math.atan2(TZ[0], TX[0]) + Math.PI / 2;
   world.add(beam);
-  const banner = new THREE.Mesh(
-    new THREE.PlaneGeometry(w * 2 + 6, 2.0),
-    new THREE.MeshBasicMaterial({ map: bannerTex, side: THREE.DoubleSide }));
-  banner.position.copy(beam.position).setY(PY[i0] + 11.6);
-  banner.rotation.y = beam.rotation.y - Math.PI / 2;
-  world.add(banner);
+  // One banner on each face of the beam, 0.7 m proud of it, each turned to
+  // face its own side so the text reads the right way round from the grid
+  // and in the mirror. A rotation about Y turns the plane's normal (+Z) and
+  // the beam's length (+X) together, so the beam's angle is face-on; the
+  // quarter turn the single banner carried since the first commit hung it
+  // edge-on along the road, and it only showed at all because that pushed
+  // it out of the 1.2 m beam it was centred in.
+  const bannerGeo = new THREE.PlaneGeometry(w * 2 + 6, 2.0), bannerMat = new THREE.MeshBasicMaterial({ map: bannerTex });
+  for (const face of [-1, 1]) {
+    const banner = new THREE.Mesh(bannerGeo, bannerMat);
+    banner.position.set(PX[i0] + TX[i0] * face * 0.7, PY[i0] + 11.6, PZ[i0] + TZ[i0] * face * 0.7);
+    banner.rotation.y = beam.rotation.y + (face < 0 ? Math.PI : 0);     // normal toward the side it hangs on
+    world.add(banner);
+  }
 }
 
 /* ---------------------------- 9. scenery ------------------------------- */
