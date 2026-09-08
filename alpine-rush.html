@@ -3186,7 +3186,7 @@ class Car {
 
     // slush spray: snow on the road comes off the rear wheels at speed as a low
     // white tail, a flicker in flurries and a rooster tail in a blizzard
-    const slush = WX.flakes && this.onTrack && this.speed > 16 ? WX.flakes / SNOW_N : 0;
+    const slush = WX.flakes && this.onTrack && this.speed > 16 && FEAT[this.hint] !== F_TUNNEL ? WX.flakes / SNOW_N : 0;   // dry tarmac inside
     if (slush && Math.random() < slush * 28 * dt) {           // per second, not per frame
       const side = Math.random() < 0.5 ? -1 : 1;
       const wx = px + cy * side * 1.0 - sy * 1.4, wz = pz - sy * side * 1.0 - cy * 1.4;
@@ -3666,6 +3666,16 @@ function updateCamera(dt) {
     camPos.lerp(want, approach(camMode === 2 ? 3.2 : 6.5 + spd * 3, dt));
     const minH = heightAt(camPos.x, camPos.z) + 1.6;
     if (camPos.y < minH) camPos.y = minH;
+    // through a tunnel the camera stays inside the arch: a swing into the
+    // wall or the CINEMA height would put it in the concrete, or outside
+    // the shell looking back in through the double-sided walls
+    const qc = nearLocal(camPos.x, camPos.z, p.hint, 60);
+    if (FEAT[qc.i] === F_TUNNEL) {
+      const latMax = TUBE.w - 1.4, lat = clamp(qc.lat, -latMax, latMax);
+      if (lat !== qc.lat) { camPos.x += RX[qc.i] * (lat - qc.lat); camPos.z += RZ[qc.i] * (lat - qc.lat); }
+      const u = lat / TUBE.w, roof = qc.y + TUBE.c + TUBE.r * Math.sqrt(Math.max(0, 1 - u * u)) - 0.9;
+      if (camPos.y > roof) camPos.y = roof;
+    }
   }
   camLook.lerp(_n.set(p.pos.x + sy * lookAhead, p.groundY + 1.5, p.pos.z + cy * lookAhead), approach(9, dt));
 
@@ -3692,6 +3702,7 @@ function updateCamera(dt) {
   sun.target.position.copy(p.pos);
   sun.position.set(p.pos.x + TOD.off[0], p.pos.y + TOD.off[1], p.pos.z + TOD.off[2]);
   snowFall.position.set(camera.position.x, 0, camera.position.z);
+  snowFall.visible = FEAT[p.hint] !== F_TUNNEL;                   // no weather under a mountain
 }
 
 /* ----------------------------- 18. HUD --------------------------------- */
