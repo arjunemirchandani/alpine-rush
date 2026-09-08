@@ -242,6 +242,23 @@ A few deliberate rules:
 - **A cup survives a reload.** Leave mid-series and the title screen offers CONTINUE · ROUND *n*
   with the standings, or ABANDON CUP (two presses, like CLEAR).
 
+### Cups worth racing
+
+Any word is a cup, but some words deal better stories than others. These are on the title screen
+under **Featured**, and each is a link:
+
+| Cup | Rounds | |
+|---|---|---|
+| [`JAKDA`](https://arjunemirchandani.github.io/alpine-rush/?cup=JAKDA) | CLEAR · CLEAR · SNOW · SNOW | an easy introduction |
+| [`ELEGANT`](https://arjunemirchandani.github.io/alpine-rush/?cup=ELEGANT) | four rounds at golden hour | the pretty one |
+| [`GLACIER`](https://arjunemirchandani.github.io/alpine-rush/?cup=GLACIER) | BLIZZARD · BLIZZARD · BLIZZARD · CLEAR at dusk | earn the final |
+| [`BLUEBIRD`](https://arjunemirchandani.github.io/alpine-rush/?cup=BLUEBIRD) | CLEAR · SNOW · BLIZZARD · WHITEOUT | the weather closes in, and the clock runs backwards — dusk, golden, dawn, day |
+| [`BLACKOUT`](https://arjunemirchandani.github.io/alpine-rush/?cup=BLACKOUT) | four blizzards | good luck |
+
+They were found by dealing every word in a dictionary through the round and weather streams and
+keeping the ones with a shape. The cup panel shows every round's hour and weather before you start,
+for any cup you type.
+
 The three rivals keep the personalities they always had — VIPER is **ruthless**, FROST is
 **clean**, KAIJU is **wild** — the cup just gives you four races to notice. Ties on points go to
 wins, then to whoever finished ahead most recently. Your totals count cups completed and titles
