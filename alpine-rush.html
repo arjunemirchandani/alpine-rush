@@ -510,6 +510,7 @@
           <button class="dbtn" data-d="0">ROOKIE</button>
           <button class="dbtn sel" data-d="1">PRO</button>
           <button class="dbtn" data-d="2">ACE</button>
+          <button class="dbtn" data-d="3">LEGEND</button>
         </div>
         <div class="rowlbl">Time of day</div>
         <div id="timerow">
@@ -2578,13 +2579,17 @@ class Car {
     c.steer = clamp(ang * 2.5 - this.drift * 0.55, -1, 1);
 
     // corner-speed planning
-    const brakeZone = 14 + sp * sp / 46;
+    // technique: brake later, but by less the faster the car is going; a late
+    // brake into a slow corner is a gain, into a fast sweeper it is the snow
+    const late = this.tech ? lerp(TECH.brake, TECH.brakeHi, clamp((sp - 38) / 24, 0, 1)) : 1;
+    const brakeZone = (14 + sp * sp / 46) * late;
     const k = Math.max(maxKappa(this.s + 5, brakeZone), 0.0008);
     // Measured: the car actually pulls ~26.7 m/s^2 lateral at p90, 28.9 at p95.
     // Planning above ~26 means demanding grip that mostly is not there, so the
     // car runs wide and loses more than the ambition gains. Ceiling ~25.5 for
     // the best drivers; their edge comes from line-holding and top speed.
-    const latGrip = (17.5 + this.skill * 8) * (1 - (1 - WX.grip) * this.cls.wx) * this.cls.grip;   // the car it is driving
+    const latGrip = (17.5 + this.skill * 8) * (1 - (1 - WX.grip) * this.cls.wx) * this.cls.grip   // the car it is driving
+                  * (this.tech ? TECH.lat : 1);
     let vT = Math.sqrt(latGrip / k);
     // already wide? recover first. Without this, a high-skill driver plans an
     // ambitious corner speed, runs wide, and plans the next one just as fast —
@@ -2594,7 +2599,7 @@ class Car {
 
     // gentle rubber band so the pack stays entertaining
     let band = 1;
-    if (!player.finished) {
+    if (!player.finished && !(this.tech && !TECH.band)) {     // a legend does not wait for you
       const gap = (player.progress - this.progress) / TOTAL;
       band = 1 + clamp(gap, -0.09, 0.09) * (gap > 0 ? 0.85 : 0.45);
     }
@@ -2608,10 +2613,27 @@ class Car {
     const tight = k > 0.013 && sp > 24;                       // hairpin coming up
     const sideways = Math.abs(ang) > 0.26 && sp > 25 && k > 0.006;
     if (tight || sideways) this.driftHold = 0.30 + this.driftSkill * 0.45;
+    // technique: a medium corner with a meter to fill is worth a slide. The
+    // drift model returns 42 % of the scrubbed sideways momentum as drive,
+    // so the corner costs little and the meter charges on the way through.
+    const tech = this.tech || 0;
+    const medium = k > 0.0045 && k < 0.013 && sp > 30;
+    if (tech * TECH.fill > 0 && medium && this.boostMeter < TECH.fillMax && this.driftHold <= 0
+        && Math.abs(this.lat) < HALF_W - TECH.fillRoom)
+      this.driftHold = TECH.hold + this.driftSkill * 0.25;
     this.driftHold = Math.max(0, this.driftHold - dt);
     c.hand = this.driftHold > 0 && Math.abs(this.drift) < 0.7;
 
     c.boost = this.boostMeter > 0.30 && k < 0.0038 && sp > 28 && Math.abs(ang) < 0.22;
+    // technique: boost adds engine force and lifts the ceiling, so it buys
+    // most below top speed with road ahead: the exit of a corner onto a
+    // straight. Fire there from a lower meter, hold it otherwise, and never
+    // sit on a full meter.
+    if (tech * TECH.exit > 0) {
+      const ceiling = TOP_SPEED * this.cls.top * this.speedMul;
+      const exiting = k < 0.006 && Math.abs(atDist(this.s + 45).k) < 0.0038 && sp < ceiling * 0.9 && Math.abs(ang) < 0.3;
+      c.boost = (exiting && this.boostMeter > 0.18) || (this.boostMeter > 0.9 && k < 0.0038 && Math.abs(ang) < 0.22);
+    }
     // slingshot: a good tow plus boost in hand is the moment to commit
     if (this.tow > 0.45 && this.boostMeter > 0.25 && onStraight) c.boost = true;
   }
@@ -2744,11 +2766,20 @@ class Car {
 }
 
 /* ---------------------------- 16. the grid ----------------------------- */
+/* LEGEND drives the same car ACE does: same skill, same 5 % speed. What it
+   adds is driver technique (tech: 1), measured one knob at a time on the
+   harness: braking 30 % later into corners (the big one, and no dirtier
+   than ACE), and spending boost on corner exits where it accelerates. Drifting
+   medium corners to bank boost, the human trick, made the AI slower: it
+   slides wide because it never learnt to steer through a slide. TECH holds
+   the knobs so the harness can switch each one. */
 const DIFF = [
-  { name: 'ROOKIE', skill: 0.55, speed: 0.88 },
-  { name: 'PRO',    skill: 0.84, speed: 0.97 },
-  { name: 'ACE',    skill: 1.00, speed: 1.05 }
+  { name: 'ROOKIE', skill: 0.55, speed: 0.88, tech: 0 },
+  { name: 'PRO',    skill: 0.84, speed: 0.97, tech: 0 },
+  { name: 'ACE',    skill: 1.00, speed: 1.05, tech: 0 },
+  { name: 'LEGEND', skill: 1.00, speed: 1.05, tech: 1 }
 ];
+const TECH = { fill: 0, exit: 1, lat: 1.0, brake: 0.70, brakeHi: 0.70, fillMax: 0.72, fillRoom: 2.5, hold: 0.22, band: 1 };
 let diff = 1;
 
 const player = new Car({
@@ -2770,6 +2801,7 @@ function applyDifficulty() {
   rivals.forEach((r, i) => {
     r.skill = clamp(d.skill + (i - 1) * 0.05, 0.2, 1);
     r.speedMul = d.speed + (i - 1) * 0.012;
+    r.tech = d.tech || 0;
   });
 }
 
@@ -3612,7 +3644,7 @@ const Game = {
    would produce different tracks on different machines. */
 const DRIVE = { seconds: 46, maxOffPct: 9, maxTests: 5, minProgress: 0.55 };
 
-function driveTest() {
+function driveTest(atDiff = 1) {
   const snaps = cars.map(c => c.snapshot());
   const g = { state: Game.state, race: Game.raceTime, now: Game.now, auto: Game.autopilot,
               order: Game.finishOrder.slice(), proj: Game.projected, testing: Game.testing };
@@ -3621,7 +3653,7 @@ function driveTest() {
 
   Game.testing = true;
   Game.autopilot = true;
-  diff = 1;                                  // always judged at PRO, not the player's pick
+  diff = atDiff;                             // judged at PRO unless a sweep asks otherwise
   applyDifficulty();
   // and always judged dry: this runs inside generateTrack, before the seed's
   // own weather is applied, so without this it would inherit whatever WX the
@@ -4131,7 +4163,7 @@ requestAnimationFrame(() => {
 //   __rush.Perf.bench()            -> 40 forced frames, ms each: compare before and after a change
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
-                  driveTest, DRIVE, Records, Ghost, LapTrace, Cup, Perf, buildCar, CLASSES,
+                  driveTest, DRIVE, Records, Ghost, LapTrace, Cup, Perf, buildCar, CLASSES, DIFF, TECH,
                   TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
 </script>
