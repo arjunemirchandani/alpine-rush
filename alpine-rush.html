@@ -918,7 +918,11 @@ function generateTrack(seedStr) {
    like the hour and the weather, so it costs nothing to describe and the same
    seed always gets the same tunnel in the same place. Most circuits get at
    least one (6% draw neither); a few get two tunnels. */
-const F_NONE = 0, F_TUNNEL = 1, F_BRIDGE = 2;
+const F_NONE = 0, F_TUNNEL = 1, F_BRIDGE = 2, F_GALLERY = 3;
+const F_CODE = { tunnel: F_TUNNEL, bridge: F_BRIDGE, gallery: F_GALLERY };
+/* a structure with a roof over the road: the camera, the snow, the spray
+   and the reverb all ask this */
+const underCover = i => FEAT[i] === F_TUNNEL || FEAT[i] === F_GALLERY;
 const FEAT = new Int8Array(N);
 const FEAT_K = new Float32Array(N);                   // structure strength along the track: 0 at its ends, 1 inside
 const STRUCT_RAMP = 25;                                // metres over which a structure's terrain arrives
@@ -926,11 +930,12 @@ let FEATURES = [];
 const STRUCT = {
   tunnel: { len: [130, 230], min: 90, kap: 0.0075, grade: 1 },      // a bore can climb; it just can't bend hard
   bridge: { len: [90, 170],  min: 70, kap: 0.009,  grade: 0.10 },   // a deck wants to be level
+  gallery: { len: [90, 160], min: 70, kap: 0.0075, grade: 1 },      // an avalanche gallery: a roof on pillars, open to the valley
   gap: 110,                                                          // metres between structures
   startClear: [80, 90]                                               // metres kept free behind / ahead of the line (the grid ends at 55)
 };
 function placeFeatures() {
-  FEAT.fill(F_NONE); FEAT_K.fill(0); FEATURES = [];
+  FEAT.fill(F_NONE); FEAT_K.fill(0); FEAT_OPEN.fill(0); FEATURES = [];
   const rnd = mulberry32(strSeed(SEED + '#T'));
   rnd(); rnd(); rnd();
   const uT = rnd(), uB = rnd();
@@ -943,7 +948,7 @@ function placeFeatures() {
   for (let i = 0; i < N; i++) if (CUM[i] < STRUCT.startClear[1] || CUM[i] > TOTAL - STRUCT.startClear[0]) taken[i] = 1;
   const grade = i => Math.abs(PY[(i + 1) % N] - PY[i]) / Math.max(SEG[i], 0.01);
 
-  for (const type of want) {
+  const place = type => {
     const R = STRUCT[type];
     let L = lerp(R.len[0], R.len[1], rnd());
     const uPick = rnd();                                             // drawn now: shrinking must not move the stream
@@ -964,21 +969,36 @@ function placeFeatures() {
         placed = { type, i0, i1, s0: CUM[i0], s1: CUM[i1 + 1], len: CUM[i1 + 1] - CUM[i0] };
       }
     }
-    if (!placed) continue;
+    if (!placed) return null;
     FEATURES.push(placed);
-    const code = type === 'tunnel' ? F_TUNNEL : F_BRIDGE;
     for (let i = placed.i0; i <= placed.i1; i++) {
-      FEAT[i] = code;
+      FEAT[i] = F_CODE[type];
       FEAT_K[i] = smooth(0, STRUCT_RAMP, Math.min(CUM[i] - placed.s0, placed.s1 - CUM[i]));
     }
     for (let i = 0; i < N; i++) {                                    // and keep the next one at arm's length
       const d = Math.min(Math.abs(CUM[i] - placed.s0), Math.abs(CUM[i] - placed.s1));
       if ((i >= placed.i0 && i <= placed.i1) || d < STRUCT.gap) taken[i] = 1;
     }
+    return placed;
+  };
+  for (const type of want) place(type);
+  // The gallery is dealt last, so its draws sit after every tunnel's and
+  // bridge's on the stream and no seed's earlier structures move. Its open
+  // side is the outside of the bend when the stretch turns, else a coin.
+  const uG = rnd();
+  if (uG < 0.55 || SEED === 'ALPINE') {
+    const g = place('gallery'), uSide = rnd();
+    if (g) {
+      let turn = 0;
+      for (let i = g.i0; i <= g.i1; i++) turn += KAP[i] * SEG[i];  // radians; + is a right turn, whose outside is the left (+lat)
+      g.open = Math.abs(turn) > 0.06 ? Math.sign(turn) : (uSide < 0.5 ? 1 : -1);
+      for (let i = g.i0; i <= g.i1; i++) FEAT_OPEN[i] = g.open;
+    }
   }
   FEATURES.sort((a, b) => a.i0 - b.i0);
   return { tunnels: FEATURES.filter(f => f.type === 'tunnel').length,
-           bridges: FEATURES.filter(f => f.type === 'bridge').length };
+           bridges: FEATURES.filter(f => f.type === 'bridge').length,
+           galleries: FEATURES.filter(f => f.type === 'gallery').length };
 }
 
 /* --------------------- 3. nearest-point queries ------------------------ */
@@ -1088,6 +1108,13 @@ function heightAt(x, z, hint, sub) {
    exposed gallery and a deck's abutments rest on real ground. */
 const TUNNEL_CAP = { h: 15, w: 34 };                  // ridge height over the road, half-width where it meets the ground
 const BRIDGE_GORGE = { depth: 40, w0: 60, w1: 150 };  // ravine depth; lateral fade into the mountainside
+/* the gallery's hill is one-sided: a ridge centred capC metres past the
+   closed wall (so it buries the wall and lies on the roof as snow, and is
+   back at ground level by the open edge), and on the open side the ground
+   falls `drop` metres from just beyond the sill, shallowing into the
+   mountainside like a bridge's ravine */
+const GALLERY_HILL = { capH: 15, capC: 14, capW: 26, drop: 25, from: 11, to: 24, w0: 60, w1: 150 };
+const FEAT_OPEN = new Int8Array(N);                   // a gallery's open side per sample (+1 left, -1 right), 0 elsewhere
 function terrainAt(x, z, hint) {
   return terrainFrom(hint === undefined ? nearGlobal(x, z) : nearLocal(x, z, hint, 30), x, z);
 }
@@ -1098,6 +1125,13 @@ function terrainFrom(q, x, z) {
   if (f === F_TUNNEL) {
     const u = q.lat / TUNNEL_CAP.w;
     return Math.max(base, q.y + TUNNEL_CAP.h * k * Math.max(0, 1 - u * u));
+  }
+  if (f === F_GALLERY) {
+    const G = GALLERY_HILL, x = FEAT_OPEN[q.i] * q.lat;               // x: + toward the open side
+    const u = (x + G.capC) / G.capW;
+    const capped = Math.max(base, q.y + G.capH * k * Math.max(0, 1 - u * u));
+    const fall = smooth(G.from, G.to, x) * (1 - smooth(G.w0, G.w1, x));
+    return lerp(capped, Math.min(capped, q.y - G.drop * k), fall);
   }
   const gorge = q.y - BRIDGE_GORGE.depth * k;
   return lerp(base, Math.min(base, gorge), 1 - smooth(BRIDGE_GORGE.w0, BRIDGE_GORGE.w1, Math.abs(q.lat)));
@@ -1476,23 +1510,31 @@ function buildTerrain() {
      or the straddling triangle's outer half still pokes up through the
      road; there it only removes ground under the road and the berm, which
      the road and snow-bank ribbons already cover. */
-  const tunnels = FEATURES.filter(f => f.type === 'tunnel');
+  // (a gallery too: there the cut is under its sloping roof slab, so the
+  // hill on the closed side lies on the roof as snow and stops at its edge)
+  const covered = FEATURES.filter(f => f.type === 'tunnel' || f.type === 'gallery');
   const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
   mat.onBeforeCompile = sh => {
-    sh.uniforms.uTun = { value: [new THREE.Vector2(), new THREE.Vector2()] };
-    tunnels.forEach((f, k) => sh.uniforms.uTun.value[k].set(f.s0, f.s1));
-    sh.uniforms.uTunN = { value: tunnels.length };
+    sh.uniforms.uTun = { value: [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()] };
+    covered.forEach((f, k) => sh.uniforms.uTun.value[k].set(f.s0, f.s1, f.type === 'tunnel' ? 1 : 3, f.open || 0));
+    sh.uniforms.uTunN = { value: covered.length };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', 'attribute vec3 aTrack; varying vec3 vTrack; varying float vY;\n#include <common>')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvTrack = aTrack; vY = position.y;');
     sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', 'varying vec3 vTrack; varying float vY; uniform vec2 uTun[2]; uniform int uTunN;\n#include <common>')
+      .replace('#include <common>', 'varying vec3 vTrack; varying float vY; uniform vec4 uTun[3]; uniform int uTunN;\n#include <common>')
       .replace('void main() {', `void main() {
-  for (int k = 0; k < 2; k++) {
+  for (int k = 0; k < 3; k++) {
     if (k >= uTunN) break;
     if (vTrack.x > uTun[k].x - 12.0 && vTrack.x < uTun[k].y + 12.0 && abs(vTrack.y) < ${(TUBE.w + TUBE.shell - 0.15).toFixed(2)}) {
-      float u = vTrack.y / ${(TUBE.w + TUBE.shell).toFixed(2)};
-      float top = ${TUBE.c.toFixed(2)} + ${(TUBE.r + TUBE.shell).toFixed(2)} * sqrt(max(0.0, 1.0 - u * u)) - 0.35;
+      float top;
+      if (uTun[k].z < 2.0) {
+        float u = vTrack.y / ${(TUBE.w + TUBE.shell).toFixed(2)};
+        top = ${TUBE.c.toFixed(2)} + ${(TUBE.r + TUBE.shell).toFixed(2)} * sqrt(max(0.0, 1.0 - u * u)) - 0.35;
+      } else {
+        float t = clamp((uTun[k].w * vTrack.y + ${(GALLERY.w + GALLERY.shell).toFixed(2)}) / ${(2 * (GALLERY.w + GALLERY.shell)).toFixed(2)}, 0.0, 1.0);
+        top = mix(${GALLERY.hClosed.toFixed(2)}, ${GALLERY.hOpen.toFixed(2)}, t) + ${GALLERY.slab.toFixed(2)} - 0.35;
+      }
       if (vY < vTrack.z + top) discard;
     }
   }`);
@@ -1713,7 +1755,17 @@ function buildScenery() {
    concrete and casts a shadow, so the sun leaves a car as it enters. */
 // light values are linear: 0.06 is a dark grey on screen, 0.3 a mid grey. The
 // floor multiplies the asphalt map (itself ~0.3), so it gets its own budget.
-const TUNNEL_VERB = 0.55;                              // reverb send inside a bore
+const TUNNEL_VERB = 0.55;                              // reverb send inside a bore; a gallery gets half
+/* the avalanche gallery: wall at w on the closed side, pillars at w on the
+   open side, both `shell` thick; the roof slab slopes from hClosed at the
+   wall to hOpen at the open edge; a sill closes the openings up to `sill` */
+const GALLERY = { w: 11.5, shell: 1.2, hClosed: 7.5, hOpen: 6.5, slab: 0.8, sill: 1.0, pillarEvery: 8, pillar: 1.2 };
+/** the ceiling height above the road inside a covered structure at sample i, lateral lat */
+function coverHeight(i, lat) {
+  if (FEAT[i] === F_TUNNEL) { const u = lat / TUBE.w; return TUBE.c + TUBE.r * Math.sqrt(Math.max(0, 1 - u * u)); }
+  const x = FEAT_OPEN[i] * lat;
+  return lerp(GALLERY.hClosed, GALLERY.hOpen, clamp((x + GALLERY.w) / (2 * GALLERY.w), 0, 1));
+}
 const TUBE = { w: 11.5, c: 3.2, r: 4.0, shell: 1.2, lampEvery: 12, amb: 0.03, spill: 0.34, pool: 0.20, poolW: 5.0,
                floorAmb: 0.19, floorPool: 1.3 };
 function archProfile(w, c, r, n = 14) {
@@ -3236,7 +3288,7 @@ class Car {
 
     // slush spray: snow on the road comes off the rear wheels at speed as a low
     // white tail, a flicker in flurries and a rooster tail in a blizzard
-    const slush = WX.flakes && this.onTrack && this.speed > 16 && FEAT[this.hint] !== F_TUNNEL ? WX.flakes / SNOW_N : 0;   // dry tarmac inside
+    const slush = WX.flakes && this.onTrack && this.speed > 16 && !underCover(this.hint) ? WX.flakes / SNOW_N : 0;   // dry tarmac under a roof
     if (slush && Math.random() < slush * 28 * dt) {           // per second, not per frame
       const side = Math.random() < 0.5 ? -1 : 1;
       const wx = px + cy * side * 1.0 - sy * 1.4, wz = pz - sy * side * 1.0 - cy * 1.4;
@@ -3720,10 +3772,10 @@ function updateCamera(dt) {
     // wall or the CINEMA height would put it in the concrete, or outside
     // the shell looking back in through the double-sided walls
     const qc = nearLocal(camPos.x, camPos.z, p.hint, 60);
-    if (FEAT[qc.i] === F_TUNNEL) {
+    if (underCover(qc.i)) {
       const latMax = TUBE.w - 1.4, lat = clamp(qc.lat, -latMax, latMax);
       if (lat !== qc.lat) { camPos.x += RX[qc.i] * (lat - qc.lat); camPos.z += RZ[qc.i] * (lat - qc.lat); }
-      const u = lat / TUBE.w, roof = qc.y + TUBE.c + TUBE.r * Math.sqrt(Math.max(0, 1 - u * u)) - 0.9;
+      const roof = qc.y + coverHeight(qc.i, lat) - 0.9;
       if (camPos.y > roof) camPos.y = roof;
     }
   }
@@ -3752,7 +3804,7 @@ function updateCamera(dt) {
   sun.target.position.copy(p.pos);
   sun.position.set(p.pos.x + TOD.off[0], p.pos.y + TOD.off[1], p.pos.z + TOD.off[2]);
   snowFall.position.set(camera.position.x, 0, camera.position.z);
-  snowFall.visible = FEAT[p.hint] !== F_TUNNEL;                   // no weather under a mountain
+  snowFall.visible = !underCover(p.hint);                          // no weather under a roof
 }
 
 /* ----------------------------- 18. HUD --------------------------------- */
@@ -3854,7 +3906,7 @@ function paintMap(g, heat, live) {
   // structures as casings under the core line: a tunnel's stretch runs
   // through a dark tube, a bridge's over a pale deck
   for (const f of FEATURES) {
-    g.strokeStyle = f.type === 'tunnel' ? 'rgba(8,12,20,.85)' : 'rgba(223,246,255,.6)'; g.lineWidth = 9;
+    g.strokeStyle = f.type === 'tunnel' ? 'rgba(8,12,20,.85)' : f.type === 'gallery' ? 'rgba(70,82,104,.85)' : 'rgba(223,246,255,.6)'; g.lineWidth = 9;
     g.beginPath();
     let p = MAPPTS.to(PX[f.i0], PZ[f.i0]); g.moveTo(p[0], p[1]);
     for (let i = Math.ceil(f.i0 / 8); i * 8 <= f.i1; i++) g.lineTo(MAPPTS[i][0], MAPPTS[i][1]);
@@ -4473,9 +4525,9 @@ function frame() {
       // slow sines the physics leans on the car with
       const howl = WX.howl * (0.75 + 0.25 * Math.sin(Game.now * 0.55) * Math.sin(Game.now * 1.9 + 1));
       // in a tunnel the wind goes and the walls come back
-      const inTunnel = FEAT[player.hint] === F_TUNNEL;
-      Sfx.set(Sfx.wind, (clamp(player.speed / TOP_SPEED, 0, 1) * 0.07 + howl) * (inTunnel ? 0.25 : 1), WX.howl ? 380 : 520);
-      Sfx.verbSend.gain.setTargetAtTime(inTunnel ? TUNNEL_VERB : 0, Sfx.ctx.currentTime, 0.12);
+      const cover = FEAT[player.hint] === F_TUNNEL ? 1 : FEAT[player.hint] === F_GALLERY ? 0.5 : 0;   // a gallery is open on one side
+      Sfx.set(Sfx.wind, (clamp(player.speed / TOP_SPEED, 0, 1) * 0.07 + howl) * (1 - 0.75 * cover), WX.howl ? 380 : 520);
+      Sfx.verbSend.gain.setTargetAtTime(TUNNEL_VERB * cover, Sfx.ctx.currentTime, 0.12);
       Sfx.set(Sfx.tow, (player.tow || 0) * 0.085, 320 + (player.tow || 0) * 680);
     }
   }
@@ -4545,7 +4597,7 @@ function showTrackInfo() {
     `<b>${(t.length / 1000).toFixed(2)} KM</b> · <b>${t.corners}</b> CORNERS · ` +
     `TIGHTEST <b>${Math.round(t.minCornerRadius)}M</b> · <b>${Math.round(t.straightPct)}%</b> FLAT OUT · ` +
     `${shape} · <b>${t.time}</b> · <b>${t.weather}</b>` +
-    (t.tunnels > 1 ? ` · <b>${t.tunnels}</b> TUNNELS` : t.tunnels ? ' · TUNNEL' : '') + (t.bridges ? ' · BRIDGE' : '') +
+    (t.tunnels > 1 ? ` · <b>${t.tunnels}</b> TUNNELS` : t.tunnels ? ' · TUNNEL' : '') + (t.bridges ? ' · BRIDGE' : '') + (t.galleries ? ' · GALLERY' : '') +
     (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '') + drive +
     (weatherOverridden() ? ` · <span style="color:var(--am)">WEATHER OVERRIDE · NO RECORDS</span>` : '');
   if (mode === 'race') seedIn.value = t.seed;   // in cup mode the input holds the cup seed
@@ -4814,7 +4866,7 @@ window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, S
                   driveTest, DRIVE, Records, Ghost, LapTrace, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
                   TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; },
-                  get FEATURES() { return FEATURES; }, FEAT, FEAT_K, STRUCT, placeFeatures, terrainAt, TUNNEL_CAP, BRIDGE_GORGE, TUBE, DECK };
+                  get FEATURES() { return FEATURES; }, FEAT, FEAT_K, STRUCT, placeFeatures, terrainAt, TUNNEL_CAP, BRIDGE_GORGE, TUBE, DECK, GALLERY, GALLERY_HILL, FEAT_OPEN, coverHeight };
 </script>
 </body>
 </html>
