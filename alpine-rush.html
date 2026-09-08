@@ -243,7 +243,14 @@
   .mbtn{ padding:8px 18px; font-size:10.5px; }
   .mbtn.sel{ background:var(--am); border-color:var(--am); box-shadow:0 0 20px rgba(255,204,51,.45); }
   #seedin:disabled, #reroll:disabled{ opacity:.45; pointer-events:none; }
+  #featured{ display:flex; gap:6px; justify-content:center; align-items:center; flex-wrap:wrap; margin-top:9px; }
+  #featured.hide{ display:none; }
+  #featured .lbl{ letter-spacing:.24em; margin-right:4px; }
+  .fbtn{ padding:6px 10px; font-size:9.5px; letter-spacing:.16em; }
+  .fbtn.sel{ background:transparent; color:var(--am); border-color:var(--am); box-shadow:none; font-weight:700; }
+  #featured.locked .fbtn{ opacity:.3; pointer-events:none; }
   #cupinfo{ margin-top:7px; font-size:10.5px; letter-spacing:.19em; color:rgba(255,204,51,.75); min-height:14px; }
+  #cupinfo .blurb{ color:rgba(223,246,255,.55); font-size:10px; }
   #cupinfo.hide{ display:none; }
   #cupinfo b{ color:var(--am); font-weight:700; }
   #cupinfo .rounds{ display:flex; gap:7px; justify-content:center; flex-wrap:wrap; margin-top:7px; }
@@ -455,6 +462,14 @@
       <span class="lbl" id="seedlbl">Circuit</span>
       <input id="seedin" maxlength="12" spellcheck="false" autocomplete="off" value="ALPINE" />
       <button class="dbtn" id="reroll">SHUFFLE</button>
+    </div>
+    <div id="featured" class="hide">
+      <span class="lbl">Featured</span>
+      <button class="dbtn fbtn" data-cup="JAKDA">JAKDA</button>
+      <button class="dbtn fbtn" data-cup="ELEGANT">ELEGANT</button>
+      <button class="dbtn fbtn" data-cup="GLACIER">GLACIER</button>
+      <button class="dbtn fbtn" data-cup="BLUEBIRD">BLUEBIRD</button>
+      <button class="dbtn fbtn" data-cup="BLACKOUT">BLACKOUT</button>
     </div>
     <div id="trackinfo"></div>
     <div id="cupinfo" class="hide"></div>
@@ -2536,6 +2551,15 @@ const LapTrace = {
    resumes it rather than losing it. */
 const CUP_ROUNDS = 4, CUP_POINTS = [10, 6, 3, 1];
 const CUP_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+/* cups worth knowing about: found by dealing every dictionary word through
+   Cup.rounds() and dealFor() and keeping the ones with a story */
+const FEATURED = {
+  JAKDA:    'AN EASY INTRODUCTION · TWO CLEAR ROUNDS, THEN SNOW',
+  ELEGANT:  'FOUR ROUNDS AT GOLDEN HOUR',
+  GLACIER:  'THREE BLIZZARDS, THEN ONE CLEAR FINAL AT DUSK',
+  BLUEBIRD: 'THE WEATHER CLOSES IN ROUND BY ROUND',
+  BLACKOUT: 'FOUR BLIZZARDS. GOOD LUCK.'
+};
 const TRAITS = { VIPER: 'RUTHLESS', FROST: 'CLEAN', KAIJU: 'WILD' };
 const Cup = {
   get data() { return Records.data.cup || null; },
@@ -3409,6 +3433,10 @@ function showCupInfo() {
   $('diff').classList.toggle('locked', live);
   $('wxrow').classList.toggle('locked', cup);
   $('abandon').classList.toggle('hide', !live);
+  $('featured').classList.toggle('hide', !cup);
+  $('featured').classList.toggle('locked', live);
+  const typed = cleanSeed(seedIn.value);
+  document.querySelectorAll('.fbtn').forEach(b => b.classList.toggle('sel', b.dataset.cup === typed));
   $('go').textContent = !cup ? 'START ENGINE' : live ? `CONTINUE · ROUND ${Cup.data.round + 1}` : 'START CUP';
   const box = $('cupinfo');
   box.classList.toggle('hide', !cup);
@@ -3428,9 +3456,14 @@ function showCupInfo() {
     head = `<b>CUP ${seed}</b> · ROUND ${round + 1} OF ${CUP_ROUNDS} · YOU ${ORD[me]}${SUF[me]} ON <b>${st[me].points}</b> PTS` +
            (lead.car !== player ? ` · ${lead.car.name} LEADS <b>${lead.points}</b>` : ' · YOU LEAD');
   }
-  box.innerHTML = `${head}${list}`;
+  const blurb = FEATURED[seed] ? `<div class="blurb">${FEATURED[seed]}</div>` : '';
+  box.innerHTML = `${head}${blurb}${list}`;
 }
 document.querySelectorAll('.mbtn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.m)));
+document.querySelectorAll('.fbtn').forEach(b => b.addEventListener('click', () => {
+  seedIn.value = b.dataset.cup;
+  applySeed(previewSeed());
+}));
 
 /* Walking away from a half-run cup is not undoable either: two presses. */
 let abandonArmedAt = 0;
