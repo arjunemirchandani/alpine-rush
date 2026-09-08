@@ -387,8 +387,21 @@ bank boost — the technique a good human uses — makes the AI slower, since it
 than steering through the slide; and planning more corner speed buys nothing, because ACE already
 sits at the car's grip ceiling.
 
-Technique alone was worth 2 %; a player who drifts for profit is 15 % up on ACE. So LEGEND also
-carries a **declared handicap** — its rivals' cars run **+25 %** in top speed, engine, grip and
+Then LEGEND learnt to **rehearse**. Every third of a second, each rival simulates the next two
+seconds under ten different scripts — the racing line, an inside or outside line, each with or
+without a slide, boost now or after the slide, a little more speed than it would normally carry —
+using the same physics the race runs, headlessly, in about half a millisecond per trial. It scores
+each by distance gained, exit speed, time in the snow and boost banked, and follows the winner for
+a third of a second before rehearsing again. "Keep doing what you're doing" is always one of the
+candidates, which is how a slide gets held through a whole corner. It isn't a rule that imitates a
+drifting player; it's a rival that tries things and keeps what works.
+
+Measured on the harness it is worth more than everything else combined: at the same handicap,
+rehearsing rivals lap 21 % faster than ACE instead of 11 %, and spend 0.8 % of their time off the
+road instead of 4.6 % — every slice they drive was tried first. With no handicap at all, rehearsal
+alone is 16 % faster than ACE on JAKDA and 21 % on the hairpin circuit.
+
+So the declared handicap came *down*: LEGEND's rivals run **+10 %** in top speed, engine, grip and
 steering, and the snow slows them less — and the CONDITIONS tab says so in as many words. Finding the right handicap was its own
 lesson: +10 % top speed alone bought under 1 % (the AI rarely reaches the ceiling), and grip alone
 sent the rivals off the road, because in this drift model a corner's speed is set by *yaw rate*, not
@@ -396,9 +409,9 @@ grip. With steering authority included, +10 % laps 5 % faster than ACE with no m
 +15 % about 7 %, +20 % about 8 %, +25 % about 11 %, +30 % only 11.4 %; softening the off-track
 penalty for those cars adds another 1 %. Two things measured and left alone: the pack's own
 collisions and avoidance cost the rivals under 1 %, and a faster boost fill made them *slower*,
-because more boost meant more time in the snow. The number is one constant (`LEGEND_HANDICAP`) —
-a player who drifts for profit was still 12 % up at +20 %, so LEGEND is a race, not a wall, and the
-honest next step past it is a rival that can drift, not a bigger number.
+because more boost meant more time in the snow. The number is one constant (`LEGEND_HANDICAP`).
+With rehearsal, +0 % is a close race against a player who drifts for profit, +10 % is about level,
+and +25 % is a wall.
 
 ### Weather
 
