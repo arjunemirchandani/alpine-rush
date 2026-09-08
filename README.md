@@ -97,8 +97,32 @@ and the last tab is remembered.
 lifts and the camera circles your actual car on the grid, so what you see is what you'll drive. The
 choice is remembered.
 
-A car is a look, not a class. Every body shares the same physics, so a record set in the rally hatch
-is exactly as hard as one set in the wedge, and the ghost you race is the lap, not the car.
+### Classes
+
+Each body drives differently. Six attributes — **speed**, **acceleration**, **grip**, **boost**
+fill, **off-road** ability and how much of the **weather** it feels — are multipliers the physics and
+the AI both read, so the rivals drive the car they are in too: VIPER's wedge is planted, FROST's
+coupé is clean, KAIJU's muscle car is powerful and loose. The CAR tab shows them as five-pip bars,
+three being the GT.
+
+| | Character |
+|---|---|
+| **GT** | balanced, no surprises |
+| **WEDGE** | aero grip, planted in the fast stuff, slow to accelerate |
+| **COUPE** | clean, boost for days |
+| **MUSCLE** | power, drifts at a glance |
+| **SUPER** | fastest on the straight, short boost, hates the snow |
+| **RALLY** | forgiving off the tarmac, feels only 60% of a blizzard, slow on the straights |
+
+They were balanced on the headless harness — all four cars in one class, 120 s at PRO, eight
+circuits from a 12-corner technical loop to 53 % flat out, in snow, clear and a blizzard. Every
+class averages within **0.55 %** of the GT's lap time; no class is more than 3.1 % off the best on
+any circuit; and four different classes take a win somewhere (WEDGE on the fast circuits, RALLY on
+the tightest and in the blizzard, MUSCLE on the hairpin circuit, SUPER on the balanced one). COUPE
+and GT never win and never lose. The first draft had MUSCLE and RALLY as outright losers; the
+harness said so in seven seconds.
+
+A record is still per circuit, but it remembers which car set it.
 
 ## Controls
 
