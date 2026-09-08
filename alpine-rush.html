@@ -3272,7 +3272,43 @@ function stepSim(dt) {
   return running;
 }
 
+/* ---- frame-time probe, debug only: __rush.Perf.snapshot() for the live
+   numbers, __rush.Perf.bench() to render 40 frames back to back with the GPU
+   forced to finish, which is comparable across changes regardless of what
+   the browser is doing with requestAnimationFrame ---- */
+const Perf = {
+  times: new Float32Array(240), head: 0, filled: 0, last: 0,
+  tick() {
+    const t = performance.now();
+    if (this.last) { this.times[this.head] = t - this.last; this.head = (this.head + 1) % 240; this.filled = Math.min(240, this.filled + 1); }
+    this.last = t;
+  },
+  snapshot() {
+    const n = this.filled, a = Array.from(this.times.subarray(0, n)).sort((x, y) => x - y);
+    const mean = n ? a.reduce((x, y) => x + y, 0) / n : 0;
+    const i = renderer.info;
+    return { fps: mean ? +(1000 / mean).toFixed(1) : 0, ms: +mean.toFixed(2),
+             p95: n ? +a[Math.floor(n * 0.95)].toFixed(2) : 0, frames: n,
+             calls: i.render.calls, triangles: i.render.triangles, points: i.render.points,
+             pixels: renderer.domElement.width * renderer.domElement.height };
+  },
+  bench(frames = 40) {
+    // gl.finish() does not reliably block on every driver; reading a pixel
+    // back does, because the result cannot exist until the GPU is done
+    const gl = renderer.getContext(), px = new Uint8Array(4);
+    const sync = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    renderer.render(scene, camera); sync();               // warm
+    const t0 = performance.now();
+    for (let k = 0; k < frames; k++) renderer.render(scene, camera);
+    sync();
+    const ms = (performance.now() - t0) / frames;
+    const i = renderer.info;
+    return { msPerFrame: +ms.toFixed(2), calls: i.render.calls, triangles: i.render.triangles };
+  }
+};
+
 function frame() {
+  Perf.tick();
   const dt = Math.min(0.05, clock.getDelta());
   Game.now += dt;
 
@@ -3569,9 +3605,11 @@ requestAnimationFrame(() => {
 //   __rush.Game.autopilot = true   -> let the AI drive your car
 //   __rush.player.boostMeter = 1   -> fill the boost bar
 //   __rush.Game.respawn()          -> pop back onto the racing line
+//   __rush.Perf.snapshot()         -> live fps / frame ms / draw calls / triangles
+//   __rush.Perf.bench()            -> 40 forced frames, ms each: compare before and after a change
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
-                  driveTest, DRIVE, Records, Ghost, LapTrace, Cup,
+                  driveTest, DRIVE, Records, Ghost, LapTrace, Cup, Perf, buildCar,
                   TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
 </script>
