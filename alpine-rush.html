@@ -360,7 +360,7 @@
   #rstats .v{ font-size:22px; color:var(--gn); font-variant-numeric:tabular-nums; text-shadow:0 0 14px rgba(102,255,168,.4); }
 
   #load{ position:fixed; inset:0; z-index:80; display:grid; place-items:center; background:var(--ink); }
-  #load .bar{ width:230px; height:2px; background:rgba(53,230,255,.15); margin-top:20px; overflow:hidden; }
+  #load .bar{ width:230px; height:2px; background:rgba(53,230,255,.15); margin:20px auto 0; overflow:hidden; }   /* a block: auto margins centre it */
   #load .bar i{ display:block; width:40%; height:100%; background:var(--cy); box-shadow:0 0 12px var(--cy); animation:sl 1.05s ease-in-out infinite; }
   @keyframes sl{ 0%{transform:translateX(-105%)} 100%{transform:translateX(255%)} }
 
