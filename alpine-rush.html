@@ -45,6 +45,18 @@
   /* ---------- HUD ---------- */
   #hud{ position:fixed; inset:0; z-index:30; pointer-events:none; opacity:0; transition:opacity .35s ease; }
   #hud.on{ opacity:1; }
+  /* replay bar: bottom centre, same glass as the HUD panels */
+  #replay{ position:fixed; left:50%; bottom:22px; transform:translateX(-50%); z-index:35;
+    display:flex; align-items:center; gap:14px; padding:10px 16px; font-size:10.5px; letter-spacing:.12em;
+    color:#dff6ff; background:rgba(8,18,28,.72); border:1px solid rgba(53,230,255,.35); border-radius:6px;
+    box-shadow:0 6px 26px rgba(0,0,0,.5); backdrop-filter:blur(6px); pointer-events:auto; user-select:none; }
+  #replay.hide{ display:none; }
+  #replay b{ color:var(--cy); font-weight:500; }
+  #replay .k{ color:rgba(223,246,255,.45); }
+  #rptrack{ position:relative; width:min(46vw,520px); height:10px; background:rgba(223,246,255,.14); border-radius:5px; cursor:pointer; }
+  #rpfill{ position:absolute; left:0; top:0; bottom:0; width:0; background:var(--cy); border-radius:5px; }
+  #rptrack i{ position:absolute; top:-3px; width:2px; height:16px; background:currentColor; opacity:.9; }
+  #rphelp{ color:rgba(223,246,255,.45); font-size:9px; }
   /* NOTCHED OUTLINES
      clip-path cuts the notch out of the element *including* its border, so on a
      filled shape the fill follows the cut and reads correctly, but on an outlined
@@ -575,6 +587,15 @@
   </div>
 </div>
 
+<div id="replay" class="hide">
+  <span id="rpplay">▶</span>
+  <span id="rptime">0:00.0</span>
+  <div id="rptrack"><div id="rpfill"></div></div>
+  <span><span class="k">CAM </span><b id="rpcam">TV</b></span>
+  <span><span class="k">ON </span><b id="rpcar">YOU</b></span>
+  <span><b id="rpspeed">1×</b></span>
+  <span id="rphelp">SPACE · ←→ · C · N · 1-4 · ESC</span>
+</div>
 <div id="pause" class="screen hide">
   <div class="card panel">
     <h1 style="font-size:min(52px,8vw)">PAUSED</h1>
@@ -608,6 +629,7 @@
       <div><div class="lbl">Drift Score</div><div class="v" id="rscore">--</div></div>
     </div>
     <button class="btn" id="again">RACE AGAIN</button>
+    <button class="btn ghost" id="watch">WATCH REPLAY</button>
     <button class="btn ghost" id="tomenu2">MAIN MENU</button>
   </div>
 </div>
@@ -2836,6 +2858,17 @@ addEventListener('keydown', e => {
   if (e.target && e.target.tagName === 'INPUT') return;      // typing a seed, not driving
   const k = KEYMAP[e.code];
   if (k) { keys[k] = true; e.preventDefault(); }
+  if (Game.state === 'replay') {                                // the replay owns the keyboard
+    if (e.code === 'Space') Replay.toggle();
+    if (e.code === 'ArrowLeft') Replay.seek(Replay.t - 5);
+    if (e.code === 'ArrowRight') Replay.seek(Replay.t + 5);
+    if (e.code === 'KeyC') Replay.cycleCam();
+    if (e.code === 'KeyN') Replay.nextCar();
+    if (e.code.startsWith('Digit')) Replay.setSpeed(+e.code[5] - 1);
+    if (e.code === 'Escape' || e.code === 'KeyP' || e.code === 'Enter') Replay.close();
+    if (e.code === 'KeyM') toast(Sfx.toggleMute() ? 'AUDIO MUTED' : 'AUDIO ON', 900);
+    return;
+  }
   if (e.code === 'KeyP' || e.code === 'Escape') Game.togglePause();
   if (e.code === 'KeyM') toast(Sfx.toggleMute() ? 'AUDIO MUTED' : 'AUDIO ON', 900);
   if (e.code === 'KeyC') Game.cycleCam();
@@ -3918,14 +3951,102 @@ const Tape = {
   }
 };
 
+/* --------------------------- 16d. the replay ---------------------------- */
+/* Plays the tape back. Physics is off; each frame every car is posed from
+   Tape.read() and updateVisual() does the rest. The camera follows any car
+   with the race's own chase, hood and cinema modes; TV is the director. */
+const RP_CAMS = ['TV', 'CHASE', 'HOOD', 'CINEMA'], RP_SPEEDS = [0.25, 0.5, 1, 2];
+const Replay = {
+  t: 0, speed: 1, playing: false, cam: 0, follow: 0, from: null, seeking: false,
+  st: [], marks: false,
+  get car() { return cars[this.follow]; },
+  get length() { return Tape.seconds; },
+  open() {
+    if (Tape.n < TAPE_HZ) { toast('NO REPLAY YET', 900); return; }
+    this.from = Game.state;                                    // what to go back to
+    Tape.stop();
+    Game.state = 'replay';
+    this.t = 0; this.playing = true; this.follow = 0; this.seeking = true;
+    this.st = cars.map(() => ({}));
+    el.hud.classList.remove('on');
+    $('results').classList.add('hide'); $('pause').classList.add('hide');
+    $('replay').classList.remove('hide');
+    Sfx.resume(); Sfx.stopMusic();
+    camMode = 0;
+    this.drawMarks();
+    this.refresh();
+  },
+  close() {
+    if (Game.state !== 'replay') return;
+    $('replay').classList.add('hide');
+    Sfx.silence();
+    cars.forEach(c => { c.view.visible = true; });
+    Game.state = 'done';
+    if (Game.resultCard) Game.showResults(Game.resultCard.rank);
+    Sfx.startMusic();
+  },
+  toggle() { this.playing = !this.playing; if (this.playing && this.t >= this.length - 0.05) this.seek(0); this.refresh(); },
+  seek(t) { this.t = clamp(t, 0, this.length); this.seeking = true; this.refresh(); },
+  setSpeed(k) { this.speed = RP_SPEEDS[clamp(k, 0, RP_SPEEDS.length - 1)]; this.refresh(); },
+  cycleCam() { this.cam = (this.cam + 1) % RP_CAMS.length; this.refresh(); },
+  nextCar() { this.follow = (this.follow + 1) % cars.length; this.seeking = true; this.refresh(); },
+  drawMarks() {
+    const tr = $('rptrack');
+    tr.querySelectorAll('i').forEach(i => i.remove());
+    for (const e of Tape.events) {
+      const i = document.createElement('i');
+      i.style.left = (100 * e.t / this.length).toFixed(2) + '%';
+      i.style.color = '#' + cars[e.car].color.toString(16).padStart(6, '0');
+      if (e.type === 'finish') i.style.height = '22px';
+      tr.appendChild(i);
+    }
+  },
+  refresh() {
+    $('rpplay').textContent = this.playing ? '❚❚' : '▶';
+    $('rptime').textContent = fmt(this.t * 1000).slice(0, -2);
+    $('rpfill').style.width = (100 * this.t / Math.max(this.length, 0.01)).toFixed(2) + '%';
+    $('rpcam').textContent = RP_CAMS[this.cam];
+    $('rpcar').textContent = this.car.name;
+    $('rpspeed').textContent = this.speed + '×';
+  },
+  update(dt) {
+    if (this.playing) {
+      this.t += dt * this.speed;
+      if (this.t >= this.length) { this.t = this.length; this.playing = false; }
+      $('rptime').textContent = fmt(this.t * 1000).slice(0, -2);
+      $('rpfill').style.width = (100 * this.t / Math.max(this.length, 0.01)).toFixed(2) + '%';
+      if (!this.playing) this.refresh();
+    }
+    const step = Math.max(dt, 1e-3);
+    cars.forEach((c, i) => {
+      const o = Tape.read(i, this.t, this.st[i]);
+      c.yawRate = this.seeking ? 0 : wrapPi(o.yaw - c.yaw) / step;
+      c.pos.x = o.x; c.pos.z = o.z; c.yaw = o.yaw;
+      c.ctl.steer = o.steer; c.ctl.throttle = o.throttle; c.ctl.brake = o.brake; c.ctl.hand = o.hand;
+      c.boosting = o.boosting; c.onTrack = o.onTrack; c.drift = o.drift; c.speed = o.speed; c.vLong = o.speed;
+      c.laps = o.laps; c.drifting = Math.abs(o.drift) > 0.25;
+      const q = this.seeking ? nearGlobal(o.x, o.z) : nearLocal(o.x, o.z, c.hint, 60);
+      c.hint = q.i; c.s = q.s; c.lat = q.lat;
+      if (this.seeking) { c.normal.set(0, 1, 0); c.suspOff = 0; c.lastSkid = [null, null]; }
+      c.updateVisual(dt, Game.now);
+    });
+    const p = this.car;
+    if (this.seeking) { camPos.copy(p.pos).add(new THREE.Vector3(0, 6, -16)); camLook.copy(p.pos); }
+    this.seeking = false;
+    camMode = this.cam === 0 ? 2 : this.cam - 1;                 // TV rides the cinema camera until it has a director
+    updateCamera(dt, p);
+    mixAudio(p);
+  }
+};
+
 /* ---------------------------- 17. camera ------------------------------- */
 const CAMS = ['CHASE', 'HOOD', 'CINEMA'];
 let camMode = 0;
 const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
 let shake = 0, fov = 72;
 
-function updateCamera(dt) {
-  const p = player, sy = Math.sin(p.yaw), cy = Math.cos(p.yaw);
+function updateCamera(dt, p = player) {
+  const sy = Math.sin(p.yaw), cy = Math.cos(p.yaw);
   const spd = p.speed / TOP_SPEED;
   let want = _v.set(0, 0, 0), lookAhead = 9;
 
@@ -4441,6 +4562,7 @@ const Game = {
      difficulty and hour can be changed without reloading the page. */
   toMenu() {
     Tape.stop();
+    $('replay').classList.add('hide');
     clearTimeout(this.resultTimer);
     this.resultCard = null; this.projected = null;
     this.state = 'menu';
@@ -4645,6 +4767,45 @@ const Perf = {
   }
 };
 
+/* ambient snow drift: x/z are relative to the camera (snowFall follows it);
+   a wind-blown flake that leaves the box respawns upwind so the cloud does
+   not thin out */
+function driftSnow(dt) {
+  const sp = snowGeo.attributes.position.array;
+  for (let i = 0; i < WX.flakes; i++) {
+    const k = i * 3;
+    sp[k + 1] -= (4 + (i % 7)) * WX.fall * dt;
+    sp[k] += (Math.sin(Game.now * 0.6 + sPhase[i]) * 2.4 + WX.wind) * dt;
+    const half = WX.box * 0.5;
+    if (sp[k + 1] < camera.position.y - 40 || Math.abs(sp[k]) > half + 20 || Math.abs(sp[k + 2]) > half + 20) {
+      sp[k + 1] = camera.position.y + 55;
+      sp[k] = (Math.random() - 0.5) * WX.box - Math.sign(WX.wind) * half * 0.3;
+      sp[k + 2] = (Math.random() - 0.5) * WX.box;
+    }
+  }
+  if (WX.flakes) snowGeo.attributes.position.needsUpdate = true;
+}
+/* the mix around one car: its engine, the nearest rival's, its tyres, the
+   wind for its speed and the weather, the walls when it is under cover */
+function mixAudio(p) {
+  if (!Sfx.ok || Sfx.muted) return;
+  Sfx.engineUpdate(Sfx.engine, p.rpm, p.ctl.throttle, 0.34);
+  let near = null, nd = 1e9;
+  for (const r of cars) { if (r === p) continue; const d = r.pos.distanceTo(p.pos); if (d < nd) { nd = d; near = r; } }
+  Sfx.engineUpdate(Sfx.rival, near.rpm, near.ctl.throttle, clamp(1 - nd / 55, 0, 1) * 0.16);
+  const slip = clamp((Math.abs(p.drift) - 0.12) * 2.4, 0, 1) * clamp(p.speed / 22, 0, 1);
+  Sfx.set(Sfx.screech, p.onTrack ? slip * 0.16 : 0, 1250 + slip * 900);
+  Sfx.set(Sfx.rumble, p.onTrack ? 0 : clamp(p.speed / 40, 0, 1) * 0.2);
+  // the weather's howl sits under the speed wind and gusts on the same
+  // slow sines the physics leans on the car with
+  const howl = WX.howl * (0.75 + 0.25 * Math.sin(Game.now * 0.55) * Math.sin(Game.now * 1.9 + 1));
+  // in a tunnel the wind goes and the walls come back
+  const cover = FEAT[p.hint] === F_TUNNEL ? 1 : FEAT[p.hint] === F_GALLERY ? 0.5 : 0;   // a gallery is open on one side
+  Sfx.set(Sfx.wind, (clamp(p.speed / TOP_SPEED, 0, 1) * 0.07 + howl) * (1 - 0.75 * cover), WX.howl ? 380 : 520);
+  Sfx.verbSend.gain.setTargetAtTime(TUNNEL_VERB * cover, Sfx.ctx.currentTime, 0.12);
+  Sfx.set(Sfx.tow, (p.tow || 0) * 0.085, 320 + (p.tow || 0) * 680);
+}
+
 function frame() {
   Perf.tick();
   const dt = Math.min(0.05, clock.getDelta());
@@ -4679,44 +4840,19 @@ function frame() {
     updateCamera(dt);
     updateHUD(dt);
 
-    // ambient snow drift
-    const sp = snowGeo.attributes.position.array;
-    for (let i = 0; i < WX.flakes; i++) {
-      const k = i * 3;
-      sp[k + 1] -= (4 + (i % 7)) * WX.fall * dt;
-      sp[k] += (Math.sin(Game.now * 0.6 + sPhase[i]) * 2.4 + WX.wind) * dt;
-      // x/z are relative to the camera (snowFall follows it); a wind-blown flake
-      // that leaves the box respawns upwind so the cloud does not thin out
-      const half = WX.box * 0.5;
-      if (sp[k + 1] < camera.position.y - 40 || Math.abs(sp[k]) > half + 20 || Math.abs(sp[k + 2]) > half + 20) {
-        sp[k + 1] = camera.position.y + 55;
-        sp[k] = (Math.random() - 0.5) * WX.box - Math.sign(WX.wind) * half * 0.3;
-        sp[k + 2] = (Math.random() - 0.5) * WX.box;
-      }
-    }
-    if (WX.flakes) snowGeo.attributes.position.needsUpdate = true;
+    driftSnow(dt);
 
     if (player.boostStarted) { player.boostStarted = false; Sfx.boost(); }
     if (player.boostDenied > 0.4) Sfx.burst(0.09, 0.05, 'bandpass', 900, 380, 4);   // "no fuel" blip
 
     // audio mix — stops at the flag so raceOut()'s fade is not rewritten each frame
-    if (Sfx.ok && !Sfx.muted && Game.state !== 'done') {
-      Sfx.engineUpdate(Sfx.engine, player.rpm, player.ctl.throttle, 0.34);
-      let near = null, nd = 1e9;
-      for (const r of rivals) { const d = r.pos.distanceTo(player.pos); if (d < nd) { nd = d; near = r; } }
-      Sfx.engineUpdate(Sfx.rival, near.rpm, near.ctl.throttle, clamp(1 - nd / 55, 0, 1) * 0.16);
-      const slip = clamp((Math.abs(player.drift) - 0.12) * 2.4, 0, 1) * clamp(player.speed / 22, 0, 1);
-      Sfx.set(Sfx.screech, player.onTrack ? slip * 0.16 : 0, 1250 + slip * 900);
-      Sfx.set(Sfx.rumble, player.onTrack ? 0 : clamp(player.speed / 40, 0, 1) * 0.2);
-      // the weather's howl sits under the speed wind and gusts on the same
-      // slow sines the physics leans on the car with
-      const howl = WX.howl * (0.75 + 0.25 * Math.sin(Game.now * 0.55) * Math.sin(Game.now * 1.9 + 1));
-      // in a tunnel the wind goes and the walls come back
-      const cover = FEAT[player.hint] === F_TUNNEL ? 1 : FEAT[player.hint] === F_GALLERY ? 0.5 : 0;   // a gallery is open on one side
-      Sfx.set(Sfx.wind, (clamp(player.speed / TOP_SPEED, 0, 1) * 0.07 + howl) * (1 - 0.75 * cover), WX.howl ? 380 : 520);
-      Sfx.verbSend.gain.setTargetAtTime(TUNNEL_VERB * cover, Sfx.ctx.currentTime, 0.12);
-      Sfx.set(Sfx.tow, (player.tow || 0) * 0.085, 320 + (player.tow || 0) * 680);
-    }
+    if (Game.state !== 'done') mixAudio(player);
+  } else if (Game.state === 'replay') {
+    Replay.update(dt);
+    updateParticles(dt);
+    flushSkids();
+    skidMat.uniforms.uTime.value = Game.now;
+    driftSnow(dt);
   }
 
   if (showcase && Game.state === 'menu' && !$('title').classList.contains('hide')) showcaseCamera(dt);
@@ -5020,6 +5156,12 @@ $('go').addEventListener('click', () => {
   Game.begin();
 });
 $('again').addEventListener('click', () => Game.advance());
+$('watch').addEventListener('click', () => Replay.open());
+$('rpplay').addEventListener('click', () => Replay.toggle());
+$('rptrack').addEventListener('click', e => {
+  const r = e.currentTarget.getBoundingClientRect();
+  Replay.seek(Replay.length * clamp((e.clientX - r.left) / r.width, 0, 1));
+});
 $('resume').addEventListener('click', () => Game.togglePause());
 $('quit').addEventListener('click', () => { $('pause').classList.add('hide'); Game.restart(); });
 $('tomenu').addEventListener('click', () => Game.toMenu());
@@ -5050,7 +5192,7 @@ requestAnimationFrame(() => {
 //   __rush.Perf.bench()            -> 40 forced frames, ms each: compare before and after a change
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
-                  driveTest, DRIVE, Records, Ghost, LapTrace, Tape, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
+                  driveTest, DRIVE, Records, Ghost, LapTrace, Tape, Replay, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
                   TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; },
                   get FEATURES() { return FEATURES; }, FEAT, FEAT_K, STRUCT, placeFeatures, terrainAt, TUNNEL_CAP, BRIDGE_GORGE, TUBE, DECK, GALLERY, GALLERY_HILL, FEAT_OPEN, coverHeight };
