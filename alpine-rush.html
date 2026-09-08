@@ -1024,7 +1024,7 @@ addEventListener('resize', () => {
    the world does - hour, weather, fog, slopes, rivals - is simply there,
    because it is the same world. The shadow map is built once per frame, not
    once per render() call. ---- */
-const MIRROR_W = 512, MIRROR_H = 160;
+const MIRROR_W = 512, MIRROR_H = 160, MIRROR_PARTICLE_ALPHA = 0.15;
 const mirrorRT = new THREE.WebGLRenderTarget(MIRROR_W, MIRROR_H, { samples: 2 });
 const rearCam = new THREE.PerspectiveCamera(58, MIRROR_W / MIRROR_H, 0.6, 2500);
 const mirrorScene = new THREE.Scene();
@@ -1038,13 +1038,15 @@ function mirrorLive() { return mirrorOn && (Game.state === 'race' || Game.state 
 function renderMirror() {
   const sy = Math.sin(player.yaw), cy = Math.cos(player.yaw);
   const p = player.pos;
-  rearCam.position.set(p.x - sy * 0.6, p.y + 1.35, p.z - cy * 0.6);
-  rearCam.lookAt(p.x - sy * 40, p.y + 1.0, p.z - cy * 40);
+  rearCam.position.set(p.x - sy * 0.6, p.y + 1.55, p.z - cy * 0.6);
+  rearCam.lookAt(p.x - sy * 40, p.y + 1.1, p.z - cy * 40);
   const wasVisible = player.view.visible;
   player.view.visible = false;                                // the lens is on the car; the car is not in shot
+  partMat.uniforms.uFade.value = MIRROR_PARTICLE_ALPHA;       // your own smoke and spray would fill the glass
   renderer.setRenderTarget(mirrorRT);
   renderer.render(scene, rearCam);
   renderer.setRenderTarget(null);
+  partMat.uniforms.uFade.value = 1;
   player.view.visible = wasVisible;
 }
 function blitMirror() {
@@ -1942,11 +1944,13 @@ partGeo.setAttribute('aSize', new THREE.BufferAttribute(pSize, 1));
 partGeo.setAttribute('aAlpha', new THREE.BufferAttribute(pAlpha, 1));
 const partMat = new THREE.ShaderMaterial({
   transparent: true, depthWrite: false,
+  uniforms: { uFade: { value: 1 } },                   // the mirror pass draws smoke and spray faint
   vertexShader: `
     attribute float aSize; attribute float aAlpha; attribute vec3 aColor;
+    uniform float uFade;
     varying float vA; varying vec3 vC;
     void main(){
-      vA = aAlpha; vC = aColor;
+      vA = aAlpha * uFade; vC = aColor;
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
       gl_PointSize = aSize * (340.0 / max(-mv.z, 1.0));
       gl_Position = projectionMatrix * mv;
