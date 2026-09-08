@@ -2457,15 +2457,21 @@ class Car {
     const hB = heightAt(px - sy * 1.7, pz - cy * 1.7, h);
     const hR = heightAt(px + cy * 0.95, pz - sy * 0.95, h);
     const hL = heightAt(px - cy * 0.95, pz + sy * 0.95, h);
-    const target = (hF + hB + hR + hL) * 0.25;
-    this.groundY += (target - this.groundY) * approach(16, dt);
+    // The height itself is the exact centre sample, every frame. Only the
+    // probes' offset from it is smoothed: smoothing the absolute height left
+    // a steady-state lag of speed x grade / 16 on every hill, which buried the
+    // car on climbs and floated it on descents (measured 0.7 m at 184 km/h).
+    const centre = heightAt(px, pz, h);
+    const off = (hF + hB + hR + hL) * 0.25 - centre;
+    this.suspOff = (this.suspOff || 0) + (off - (this.suspOff || 0)) * approach(16, dt);
+    this.groundY = centre + this.suspOff;
     this.pos.y = this.groundY;
 
     _v.set(sy * 3.4, hF - hB, cy * 3.4);
     _n.set(cy * 1.9, hR - hL, -sy * 1.9);
     _n.crossVectors(_v, _n).normalize();
     if (_n.y < 0.2) _n.set(0, 1, 0);
-    this.normal.lerp(_n, approach(12, dt));
+    this.normal.lerp(_n, approach(24, dt));                 // pitch and roll lag the same way
 
     const leanT = clamp(-this.yawRate * 0.06 - this.drift * 0.10, -0.22, 0.22);
     this.lean += (leanT - this.lean) * approach(9, dt);
