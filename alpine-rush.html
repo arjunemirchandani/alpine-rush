@@ -1714,8 +1714,8 @@ function buildScenery() {
 // light values are linear: 0.06 is a dark grey on screen, 0.3 a mid grey. The
 // floor multiplies the asphalt map (itself ~0.3), so it gets its own budget.
 const TUNNEL_VERB = 0.55;                              // reverb send inside a bore
-const TUBE = { w: 11.5, c: 3.2, r: 4.0, shell: 1.2, lampEvery: 12, amb: 0.06, spill: 0.45, pool: 0.22, poolW: 5.0,
-               floorAmb: 0.30, floorPool: 1.3 };
+const TUBE = { w: 11.5, c: 3.2, r: 4.0, shell: 1.2, lampEvery: 12, amb: 0.03, spill: 0.34, pool: 0.20, poolW: 5.0,
+               floorAmb: 0.19, floorPool: 1.3 };
 function archProfile(w, c, r, n = 14) {
   const pts = [[-w, 0]];
   for (let k = 0; k <= n; k++) { const a = Math.PI - Math.PI * k / n; pts.push([w * Math.cos(a), c + r * Math.sin(a)]); }
