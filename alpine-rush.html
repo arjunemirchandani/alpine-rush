@@ -1561,6 +1561,41 @@ const STYLES = {
   coupe:  { body: BODY_COUPE,  cabin: CABIN_COUPE,  wing: 'lip',  track: [0.98, 1.00], lights: [0.44, 0.60, 2.02], mirrors: [0.94, 1.02, 0.74] },
   muscle: { body: BODY_MUSCLE, cabin: CABIN_MUSCLE, wing: 'low',  track: [1.06, 1.10], lights: [0.56, 0.62, 2.10], mirrors: [1.02, 1.04, 0.10], scoop: true }
 };
+/* one geometry from many placed parts, so a car's static bodywork is one
+   draw call per material instead of one per piece. Positions go through the
+   part's matrix, normals through its normal matrix; indices are rebased. */
+const _m4 = new THREE.Matrix4(), _m3 = new THREE.Matrix3(), _mv = new THREE.Vector3(), _mn = new THREE.Vector3();
+const _mq = new THREE.Quaternion(), _me = new THREE.Euler(), _ms = new THREE.Vector3();
+function mergeParts(parts) {
+  const P = [], N = [], I = []; let base = 0;
+  for (const p of parts) {
+    const pos = p.geo.attributes.position, nor = p.geo.attributes.normal;
+    _me.set(...(p.rot || [0, 0, 0])); _mq.setFromEuler(_me); _ms.set(...(p.scale || [1, 1, 1]));
+    _m4.compose(_mv.set(...p.pos), _mq, _ms); _m3.getNormalMatrix(_m4);
+    for (let i = 0; i < pos.count; i++) {
+      _mv.fromBufferAttribute(pos, i).applyMatrix4(_m4); P.push(_mv.x, _mv.y, _mv.z);
+      _mn.fromBufferAttribute(nor, i).applyMatrix3(_m3).normalize(); N.push(_mn.x, _mn.y, _mn.z);
+    }
+    if (p.geo.index) for (let k = 0; k < p.geo.index.count; k++) I.push(p.geo.index.getX(k) + base);
+    else for (let k = 0; k < pos.count; k++) I.push(k + base);
+    base += pos.count;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+  geo.setIndex(I);
+  return geo;
+}
+/* the faces of one material group as their own geometry (the cabin's roof) */
+function groupGeometry(geo, gi) {
+  const g = geo.groups[gi]; if (!g) return null;
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', geo.attributes.position);
+  out.setAttribute('normal', geo.attributes.normal);
+  out.setIndex(Array.from(geo.index.array.subarray(g.start, g.start + g.count)));
+  return out;
+}
+
 /* a box with its edges eased, for wings and splitters: a two-section loft
    with the rounding doing the work */
 function chamferBox(sx, sy, sz, r) {
@@ -1582,23 +1617,32 @@ function buildCar(color, accent, style = 'gt') {
   const trim  = new THREE.MeshStandardMaterial({ color: accent, roughness: 0.3, metalness: 0.7, envMap: carEnv });
   ENV_MATS.add(paint); ENV_MATS.add(glass); ENV_MATS.add(trim);
 
-  const add = (geo, mat, x, y, z, sx, sy, sz) => {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(x, y, z); if (sx !== undefined) m.scale.set(sx, sy, sz);
-    m.castShadow = true; g.add(m); return m;
+  // static bodywork is collected per material and merged below: one draw
+  // call each for paint, glass, dark, trim, chrome, lamps and brake lamps
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xb8bec8, roughness: 0.25, metalness: 1, envMap: carEnv });
+  ENV_MATS.add(chrome);
+  const head = new THREE.MeshBasicMaterial({ color: 0xfff4d0 });
+  const brakeMat = new THREE.MeshBasicMaterial({ color: 0x330008 });
+  const parts = new Map();
+  const add = (geo, mat, x, y, z, sx, sy, sz, rx, ry, rz) => {
+    if (!parts.has(mat)) parts.set(mat, []);
+    parts.get(mat).push({ geo, pos: [x, y, z], scale: sx !== undefined ? [sx, sy, sz] : undefined,
+                          rot: rx !== undefined ? [rx, ry, rz] : undefined });
   };
+  if (!S.geo.roof) { S.geo.roof = groupGeometry(S.geo.cabin, 1); S.geo.glass = groupGeometry(S.geo.cabin, 0); }
   add(S.geo.body, paint, 0, 0, 0);                              // the shell
-  add(S.geo.cabin, [glass, paint], 0, 0, 0);                    // greenhouse, painted roof
+  add(S.geo.glass, glass, 0, 0, 0);                             // greenhouse
+  add(S.geo.roof, paint, 0, 0, 0);                              // its painted roof
   const box = new THREE.BoxGeometry(1, 1, 1);
   add(chamferBox(1.50, 0.10, 0.34, 0.04), trim, 0, 0.36, S.lights[2] + 0.03);   // splitter
   if (S.wing === 'high' || S.wing === 'big') {
     const big = S.wing === 'big';
-    const wing = add(chamferBox(big ? 1.98 : 1.86, 0.08, 0.50, 0.03), trim, 0, big ? 1.34 : 1.28, -1.95);
-    wing.rotation.x = 0.10;                                          // a touch of angle of attack
+    add(chamferBox(big ? 1.98 : 1.86, 0.08, 0.50, 0.03), trim, 0, big ? 1.34 : 1.28, -1.95,
+        1, 1, 1, 0.10, 0, 0);                                        // a touch of angle of attack
     add(box, dark, -0.72, big ? 1.06 : 1.05, -1.90, 0.10, big ? 0.52 : 0.42, 0.20);   // stays, swept
     add(box, dark,  0.72, big ? 1.06 : 1.05, -1.90, 0.10, big ? 0.52 : 0.42, 0.20);
   } else if (S.wing === 'lip') {
-    add(chamferBox(1.40, 0.06, 0.26, 0.02), trim, 0, 0.90, -2.02).rotation.x = -0.35;   // ducktail
+    add(chamferBox(1.40, 0.06, 0.26, 0.02), trim, 0, 0.90, -2.02, 1, 1, 1, -0.35, 0, 0);   // ducktail
   } else {
     add(chamferBox(2.10, 0.07, 0.40, 0.03), trim, 0, 1.06, -2.00);   // a low, wide blade
     add(box, dark, -0.85, 0.98, -1.96, 0.10, 0.14, 0.18); add(box, dark, 0.85, 0.98, -1.96, 0.10, 0.14, 0.18);
@@ -1612,8 +1656,6 @@ function buildCar(color, accent, style = 'gt') {
     add(box, dark, side * (mx - 0.10), my - 0.04, mz + 0.02, 0.16, 0.04, 0.04);   // stalk
   }
   const pipeGeo = new THREE.CylinderGeometry(0.07, 0.08, 0.30, 10); pipeGeo.rotateX(Math.PI / 2);
-  const chrome = new THREE.MeshStandardMaterial({ color: 0xb8bec8, roughness: 0.25, metalness: 1, envMap: carEnv });
-  ENV_MATS.add(chrome);
   add(pipeGeo, chrome, -0.62, 0.42, -2.20); add(pipeGeo, chrome, -0.44, 0.42, -2.20);
   add(pipeGeo, chrome,  0.62, 0.42, -2.20); add(pipeGeo, chrome,  0.44, 0.42, -2.20);
   add(box, dark, 0, 0.40, -2.12, 1.30, 0.10, 0.22);                // diffuser
@@ -1623,14 +1665,15 @@ function buildCar(color, accent, style = 'gt') {
   const archGeo = new THREE.CylinderGeometry(0.56, 0.56, 0.08, 20); archGeo.rotateZ(Math.PI / 2);
   const [tf, tr] = S.track;
   for (const [x, z] of [[-tf + 0.01, 1.42], [tf - 0.01, 1.42], [-tr + 0.01, -1.40], [tr - 0.01, -1.40]]) add(archGeo, dark, x, 0.44, z);
-
-  const head = new THREE.MeshBasicMaterial({ color: 0xfff4d0 });
   const [lx, ly, lz] = S.lights;
   add(box, head, -lx, ly, lz, 0.34, 0.12, 0.06);
   add(box, head,  lx, ly, lz, 0.34, 0.12, 0.06);
-  const brakeMat = new THREE.MeshBasicMaterial({ color: 0x330008 });
   add(box, brakeMat, -0.46, 0.62, -2.12, 0.40, 0.14, 0.06);
   add(box, brakeMat,  0.46, 0.62, -2.12, 0.40, 0.14, 0.06);
+  for (const [mat, list] of parts) {
+    const m = new THREE.Mesh(mergeParts(list), mat);
+    m.castShadow = true; g.add(m);
+  }
 
   // wheels
   const wgeo = new THREE.CylinderGeometry(0.44, 0.44, 0.34, 16);
