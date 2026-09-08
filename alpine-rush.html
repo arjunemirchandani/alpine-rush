@@ -523,7 +523,8 @@
           <button class="dbtn" data-d="0">ROOKIE</button>
           <button class="dbtn sel" data-d="1">PRO</button>
           <button class="dbtn" data-d="2">ACE</button>
-          <button class="dbtn" data-d="3">LEGEND</button>
+          <button class="dbtn" data-d="3">MASTER</button>
+          <button class="dbtn" data-d="4">LEGEND</button>
         </div>
         <div id="difflbl" class="rowlbl dim"></div>
         <div class="rowlbl">Time of day</div>
@@ -2930,6 +2931,7 @@ const DIFF = [
   { name: 'ROOKIE', skill: 0.55, speed: 0.88, tech: 0, handicap: 0 },
   { name: 'PRO',    skill: 0.84, speed: 0.97, tech: 0, handicap: 0 },
   { name: 'ACE',    skill: 1.00, speed: 1.05, tech: 0, handicap: 0 },
+  { name: 'MASTER', skill: 1.00, speed: 1.05, tech: 1, handicap: 0 },               // rehearses, same car as ACE
   { name: 'LEGEND', skill: 1.00, speed: 1.05, tech: 1, handicap: LEGEND_HANDICAP }
 ];
 /* rehearsal: horizon and step of each trial, and what the score values.
@@ -4073,7 +4075,8 @@ const DIFF_NOTES = [
   'RIVALS AT 88 % · A FIRST DRIVE',
   'RIVALS AT 97 % · THE MEASURED BASELINE',
   'RIVALS AT 105 % · THE AI AT ITS CORNERING CEILING',
-  `<b>REHEARSES EVERY CORNER</b> — TRIES THE LINE, THE SLIDE AND THE BOOST BEFORE COMMITTING · CARS +${Math.round(LEGEND_HANDICAP * 100)} %`
+  '<b>REHEARSES EVERY CORNER</b> — TRIES THE LINE, THE SLIDE AND THE BOOST BEFORE COMMITTING · ACE\'S CAR',
+  `<b>REHEARSES EVERY CORNER</b> · CARS +${Math.round(LEGEND_HANDICAP * 100)} % SPEED, POWER, GRIP, STEERING — YOU ASKED FOR IT`
 ];
 function refreshSummary() {
   $('difflbl').innerHTML = DIFF_NOTES[diff] || '';
