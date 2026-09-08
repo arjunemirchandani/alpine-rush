@@ -376,6 +376,18 @@ those figures were optimistic. Each rival draws a random wander phase per page l
 lap time by ~0.1–0.2 s, and on circuits where two tiers sit close together that is enough to flip
 the ordering. Any tier comparison has to average over several realisations to mean anything.
 
+**LEGEND** is a fourth tier above ACE. It drives the same car — same skill, same 5 % speed — and
+adds technique instead: it brakes 30 % later into corners and spends boost on corner exits, where
+boost accelerates, rather than on any clean straight. Measured on the harness it laps 2.3 % faster
+than ACE on average, up to 9 % on technical circuits, and about 1 % slower on the fastest sweeper
+circuits, with off-track essentially unchanged.
+
+Two things it deliberately does *not* do, because the harness said no: drifting medium corners to
+bank boost — the technique a good human uses — makes the AI slower, since it slides wide rather
+than steering through the slide; and planning more corner speed buys nothing, because ACE already
+sits at the car's grip ceiling. A player who drifts for profit will still beat LEGEND; that is the
+sim being honest, not the rivals being kind.
+
 ### Weather
 
 Every seed also deals a condition, from its own stream and on top of the circuit — never part of
