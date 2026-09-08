@@ -909,6 +909,72 @@ function generateTrack(seedStr) {
   return { ...measureTrack(), seed: SEED, attempts: -1, hour: TIMES[CLASSIC.time].name, drive: null };
 }
 
+/* --------------------- 3b. tunnels and bridges ------------------------- */
+/* Structures are dealt on top of the accepted curve, never into it: the
+   centreline, the drive test and every existing seed's circuit are exactly
+   what they were. A structure is a run of centreline samples; FEAT marks each
+   sample so the builders and the physics can ask in O(1). Dealt off SEED+'#T'
+   like the hour and the weather, so it costs nothing to describe and the same
+   seed always gets the same tunnel in the same place. Most circuits get at
+   least one (6% draw neither); a few get two tunnels. */
+const F_NONE = 0, F_TUNNEL = 1, F_BRIDGE = 2;
+const FEAT = new Int8Array(N);
+let FEATURES = [];
+const STRUCT = {
+  tunnel: { len: [130, 230], min: 90, kap: 0.0075, grade: 1 },      // a bore can climb; it just can't bend hard
+  bridge: { len: [90, 170],  min: 70, kap: 0.009,  grade: 0.10 },   // a deck wants to be level
+  gap: 110,                                                          // metres between structures
+  startClear: [80, 90]                                               // metres kept free behind / ahead of the line (the grid ends at 55)
+};
+function placeFeatures() {
+  FEAT.fill(F_NONE); FEATURES = [];
+  const rnd = mulberry32(strSeed(SEED + '#T'));
+  rnd(); rnd(); rnd();
+  const uT = rnd(), uB = rnd();
+  const want = [];
+  if (uB >= 0.30) want.push('bridge');                               // first pick: its grade rule is the stricter
+  for (let k = 0, n = uT < 0.20 ? 0 : uT < 0.70 ? 1 : 2; k < n; k++) want.push('tunnel');
+  if (SEED === 'ALPINE') want.splice(0, want.length, 'bridge', 'tunnel');   // the curated default shows one of each
+
+  const taken = new Uint8Array(N);
+  for (let i = 0; i < N; i++) if (CUM[i] < STRUCT.startClear[1] || CUM[i] > TOTAL - STRUCT.startClear[0]) taken[i] = 1;
+  const grade = i => Math.abs(PY[(i + 1) % N] - PY[i]) / Math.max(SEG[i], 0.01);
+
+  for (const type of want) {
+    const R = STRUCT[type];
+    let L = lerp(R.len[0], R.len[1], rnd());
+    const uPick = rnd();                                             // drawn now: shrinking must not move the stream
+    // prefix count of samples this structure may not stand on
+    const bad = new Uint32Array(N + 1);
+    for (let i = 0; i < N; i++) bad[i + 1] = bad[i] + (taken[i] || Math.abs(KAP[i]) > R.kap || grade(i) > R.grade ? 1 : 0);
+    let placed = null;
+    for (; L >= R.min && !placed; L -= 20) {
+      const valid = [];
+      for (let i0 = 0, i1 = 0; i0 < N; i0++) {
+        while (i1 < N && CUM[i1] - CUM[i0] < L) i1++;                // i1: first sample at or past the far end
+        if (i1 >= N) break;
+        if (bad[i1 + 1] - bad[i0] === 0) valid.push(i0);
+      }
+      if (valid.length) {
+        const i0 = valid[(uPick * valid.length) | 0];
+        let i1 = i0; while (CUM[i1] - CUM[i0] < L) i1++;
+        placed = { type, i0, i1, s0: CUM[i0], s1: CUM[i1 + 1], len: CUM[i1 + 1] - CUM[i0] };
+      }
+    }
+    if (!placed) continue;
+    FEATURES.push(placed);
+    const code = type === 'tunnel' ? F_TUNNEL : F_BRIDGE;
+    for (let i = placed.i0; i <= placed.i1; i++) FEAT[i] = code;
+    for (let i = 0; i < N; i++) {                                    // and keep the next one at arm's length
+      const d = Math.min(Math.abs(CUM[i] - placed.s0), Math.abs(CUM[i] - placed.s1));
+      if ((i >= placed.i0 && i <= placed.i1) || d < STRUCT.gap) taken[i] = 1;
+    }
+  }
+  FEATURES.sort((a, b) => a.i0 - b.i0);
+  return { tunnels: FEATURES.filter(f => f.type === 'tunnel').length,
+           bridges: FEATURES.filter(f => f.type === 'bridge').length };
+}
+
 /* --------------------- 3. nearest-point queries ------------------------ */
 const Q = { i: 0, t: 0, s: 0, lat: 0, y: 0, d2: 0 };
 
@@ -1544,6 +1610,7 @@ let wxChoice = -1;                         // weather override; a cup always tak
 function weatherOverridden() { return mode !== 'cup' && wxChoice >= 0 && wxChoice !== (TRACK.wx ?? 0); }
 function loadTrack(seedStr) {
   trackInfo = generateTrack(seedStr);
+  Object.assign(trackInfo, placeFeatures());          // on the accepted curve only: candidates never carry structures
   applyTimeOfDay(timeChoice >= 0 ? timeChoice : (TRACK.time ?? 1));
   applyWeather(mode !== 'cup' && wxChoice >= 0 ? wxChoice : (TRACK.wx ?? 0));
   trackInfo.time = TOD.name; trackInfo.weather = WX.name;
@@ -4121,7 +4188,9 @@ function showTrackInfo() {
   trackInfoEl.innerHTML =
     `<b>${(t.length / 1000).toFixed(2)} KM</b> · <b>${t.corners}</b> CORNERS · ` +
     `TIGHTEST <b>${Math.round(t.minCornerRadius)}M</b> · <b>${Math.round(t.straightPct)}%</b> FLAT OUT · ` +
-    `${shape} · <b>${t.time}</b> · <b>${t.weather}</b>` + (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '') + drive +
+    `${shape} · <b>${t.time}</b> · <b>${t.weather}</b>` +
+    (t.tunnels > 1 ? ` · <b>${t.tunnels}</b> TUNNELS` : t.tunnels ? ' · TUNNEL' : '') + (t.bridges ? ' · BRIDGE' : '') +
+    (t.attempts > 1 ? ` · ${t.attempts} DRAWS` : '') + drive +
     (weatherOverridden() ? ` · <span style="color:var(--am)">WEATHER OVERRIDE · NO RECORDS</span>` : '');
   if (mode === 'race') seedIn.value = t.seed;   // in cup mode the input holds the cup seed
   // the address bar shares what you'd want shared: the circuit, or the cup
@@ -4388,7 +4457,8 @@ window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, S
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
                   driveTest, DRIVE, Records, Ghost, LapTrace, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
                   TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
-                  get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; } };
+                  get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; },
+                  get FEATURES() { return FEATURES; }, FEAT, STRUCT, placeFeatures };
 </script>
 </body>
 </html>
