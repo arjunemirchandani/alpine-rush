@@ -135,6 +135,7 @@ A record is still per circuit, but it remembers which car set it.
 | `SHIFT` | Boost (spends the meter) |
 | `C` | Cycle camera (chase / bonnet / cinematic) |
 | `V` | Rear-view mirror on / off |
+| `Space` `←` `→` `C` `N` `1`–`4` `Esc` | In a replay: pause, seek 5 s, camera, next car, speed, exit |
 | `R` | Respawn on the racing line |
 | `P` or `ESC` | Pause · `M` Mute |
 
@@ -228,6 +229,23 @@ The engineering write-up for each change is archived in
 [`docs/PULL-REQUESTS.md`](docs/PULL-REQUESTS.md).
 
 ---
+
+## Replay
+
+Every race is taped: all four cars, 30 times a second, from the green light to the last flag —
+position, heading and the handful of numbers the visuals read (steer, brake, handbrake, boost,
+drift, rpm, speed). **WATCH REPLAY** on the results card plays it back. Physics is off; the cars are
+posed from the tape and the same code that draws them in the race gives the wheels, lights, spray,
+smoke and skids; the engine note comes off the recorded rpm.
+
+The default camera is **TV**: trackside cameras placed on the outside of every bend, one in the
+ravine under each bridge looking up at the viaduct, one at the drop beside each gallery looking
+through the pillars, a pair outside every tunnel portal (inside a bore the director rides the chase
+camera). It follows the nearest camera ahead of your car and cuts when you're 45 m past it; the lens
+keeps the car the same size on screen, so it goes long on the straights. **C** cycles TV → chase →
+hood → cinema; **N** follows the next car. **Space** pauses, **←/→** seek 5 s, **1–4** set the speed
+from ¼× to 2×, click the timeline to scrub (the ticks are laps and finishes in each car's colour),
+**Esc** returns to the results card. The tape is kept in memory for the last race only.
 
 ## Records and the ghost
 
