@@ -246,9 +246,15 @@
   #cupinfo{ margin-top:7px; font-size:10.5px; letter-spacing:.19em; color:rgba(255,204,51,.75); min-height:14px; }
   #cupinfo.hide{ display:none; }
   #cupinfo b{ color:var(--am); font-weight:700; }
-  #cupinfo .r{ color:rgba(223,246,255,.4); }
-  #cupinfo .r.now{ color:#fff; text-shadow:0 0 10px rgba(255,255,255,.5); }
-  #cupinfo .r.done{ text-decoration:line-through; }
+  #cupinfo .rounds{ display:flex; gap:7px; justify-content:center; flex-wrap:wrap; margin-top:7px; }
+  #cupinfo .r{ display:inline-flex; flex-direction:column; align-items:center; gap:2px; min-width:92px;
+               padding:5px 8px 4px; border:1px solid rgba(255,204,51,.16); color:rgba(223,246,255,.45); }
+  #cupinfo .r b{ color:rgba(223,246,255,.7); font-weight:700; letter-spacing:.2em; }
+  #cupinfo .r i{ font-style:normal; font-size:8.5px; letter-spacing:.14em; color:rgba(223,246,255,.38); }
+  #cupinfo .r.now{ border-color:rgba(255,255,255,.55); }
+  #cupinfo .r.now b{ color:#fff; text-shadow:0 0 10px rgba(255,255,255,.5); }
+  #cupinfo .r.done{ opacity:.35; }
+  #cupinfo .r.done b{ text-decoration:line-through; }
   #abandon{ margin:14px 0 0 10px; vertical-align:bottom; border-color:rgba(255,62,165,.35); color:rgba(255,62,165,.8); }
   #abandon.hide{ display:none; }
   #abandon:hover{ background:rgba(255,62,165,.10); }
@@ -741,6 +747,20 @@ function isDrivable(m) {
       && m.corners         >= 6;
 }
 
+/* The hour and the weather a seed deals, without building its circuit: each
+   comes off its own stream, so the title can describe a cup's four rounds for
+   the price of eight hashes. */
+function dealFor(seed) {
+  const hourRnd = mulberry32(strSeed(seed + '#H'));
+  hourRnd(); hourRnd(); hourRnd();          // discard: mulberry32's first outputs track the seed
+  const hour = (hourRnd() * 4) | 0;
+  const wxRnd = mulberry32(strSeed(seed + '#W'));
+  wxRnd(); wxRnd(); wxRnd();
+  let wx = 0, u = wxRnd();                  // weighted by WEATHER[].p
+  for (let k = 0; k < WEATHER.length - 1 && u >= WEATHER[k].p; k++) { u -= WEATHER[k].p; wx = k + 1; }
+  return { hour, wx };
+}
+
 /* Draw candidates until one measures as drivable. Deterministic per seed:
    the same seed always walks the same sequence and accepts the same track. */
 function cleanSeed(str) {
@@ -758,13 +778,7 @@ function generateTrack(seedStr) {
   // The hour comes off its own stream. Drawn inside drawParams it was the last
   // value of each candidate, and since the retry loop discards whole candidates
   // the surviving draw was badly skewed — 43% DUSK, 10% DAY over 120 seeds.
-  const hourRnd = mulberry32(strSeed(SEED + '#H'));
-  hourRnd(); hourRnd(); hourRnd();          // discard: mulberry32's first outputs track the seed
-  const hour = (hourRnd() * 4) | 0;
-  const wxRnd = mulberry32(strSeed(SEED + '#W'));
-  wxRnd(); wxRnd(); wxRnd();
-  let wx = 0, u = wxRnd();                  // weighted by WEATHER[].p
-  for (let k = 0; k < WEATHER.length - 1 && u >= WEATHER[k].p; k++) { u -= WEATHER[k].p; wx = k + 1; }
+  const { hour, wx } = dealFor(SEED);
   for (let attempt = 1; attempt <= 60; attempt++) {
     TRACK = drawParams(rnd);
     TRACK.time = hour; TRACK.wx = wx;
@@ -3401,15 +3415,20 @@ function showCupInfo() {
   if (!cup) return;
   const seed = Cup.active ? Cup.data.seed : cleanSeed(seedIn.value);
   const round = Cup.active ? Cup.data.round : 0;
-  const list = Cup.rounds(seed).map((r, i) =>
-    `<span class="r${i < round ? ' done' : i === round ? ' now' : ''}">${r}</span>`).join(' → ');
+  // each round as a card: seed, then the hour and weather it deals, so a cup
+  // is legible before you commit to it (dealFor is eight hashes, no circuit)
+  const list = '<span class="rounds">' + Cup.rounds(seed).map((r, i) => {
+    const d = dealFor(r);
+    return `<span class="r${i < round ? ' done' : i === round ? ' now' : ''}"><b>${r}</b>` +
+           `<i>${TIMES[d.hour].name} · ${WEATHER[d.wx].name}</i></span>`;
+  }).join('') + '</span>';
   let head = `<b>${CUP_ROUNDS} ROUNDS</b> · ${CUP_POINTS.join(' / ')} PTS`;
   if (Cup.active && !Cup.done) {
     const st = Cup.standings(), me = st.findIndex(r => r.car === player), lead = st[0];
     head = `<b>CUP ${seed}</b> · ROUND ${round + 1} OF ${CUP_ROUNDS} · YOU ${ORD[me]}${SUF[me]} ON <b>${st[me].points}</b> PTS` +
            (lead.car !== player ? ` · ${lead.car.name} LEADS <b>${lead.points}</b>` : ' · YOU LEAD');
   }
-  box.innerHTML = `${head}<br>${list}`;
+  box.innerHTML = `${head}${list}`;
 }
 document.querySelectorAll('.mbtn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.m)));
 
