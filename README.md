@@ -155,6 +155,12 @@ only trickles it. You start 4th of 4 on purpose.
 
 ---
 
+A **rear-view mirror** sits at the top of the HUD during a race — a second camera on the car looking
+straight back, rendered into a small texture once a frame and flipped like a real mirror. From the
+chase view it reads as a rear camera: you watch your car from behind, and the mirror shows what is
+behind it. `V` toggles it. It costs about a quarter of a millisecond a frame; the shadow map is
+built once per frame and shared by both passes.
+
 ## Circuits
 
 The default circuit is `ALPINE` — the hand-tuned original. Any other seed string generates a
