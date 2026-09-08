@@ -1475,6 +1475,14 @@ const CABIN = [
   { z: -1.56, w: 0.68, roofW: 0.58, yBot: 0.84, yTop: 0.88, r: 0.04 }
 ];
 let bodyGeo = null, cabinGeo = null;                   // shared by every car
+/* a box with its edges eased, for wings and splitters: a two-section loft
+   with the rounding doing the work */
+function chamferBox(sx, sy, sz, r) {
+  const st = { w: sx * 0.5, roofW: sx * 0.5, yBot: -sy * 0.5, yTop: sy * 0.5, r };
+  return loft([{ ...st, z: sz * 0.5, w: sx * 0.5 - r * 0.6, roofW: sx * 0.5 - r * 0.6 },
+               { ...st, z: sz * 0.5 - r }, { ...st, z: -sz * 0.5 + r },
+               { ...st, z: -sz * 0.5, w: sx * 0.5 - r * 0.6, roofW: sx * 0.5 - r * 0.6 }]);
+}
 
 function buildCar(color, accent) {
   const g = new THREE.Group();
@@ -1492,10 +1500,23 @@ function buildCar(color, accent) {
   add(bodyGeo, paint, 0, 0, 0);                                 // the shell
   add(cabinGeo, [glass, paint], 0, 0, 0);                       // greenhouse, painted roof
   const box = new THREE.BoxGeometry(1, 1, 1);
-  add(box, trim,  0, 0.36, 2.10, 1.50, 0.12, 0.30);            // splitter
-  add(box, trim,  0, 1.28, -1.95, 1.86, 0.10, 0.52);           // wing plane
-  add(box, dark, -0.72, 1.05, -1.90, 0.12, 0.42, 0.12);        // wing stays
-  add(box, dark,  0.72, 1.05, -1.90, 0.12, 0.42, 0.12);
+  add(chamferBox(1.50, 0.10, 0.34, 0.04), trim, 0, 0.36, 2.08);   // splitter
+  const wing = add(chamferBox(1.86, 0.08, 0.50, 0.03), trim, 0, 1.28, -1.95);
+  wing.rotation.x = 0.10;                                          // a touch of angle of attack
+  add(box, dark, -0.72, 1.05, -1.90, 0.10, 0.42, 0.20);            // wing stays, swept
+  add(box, dark,  0.72, 1.05, -1.90, 0.10, 0.42, 0.20);
+  // mirrors, exhausts and a diffuser: the small things a silhouette is read by
+  const mirrorGeo = new THREE.SphereGeometry(0.09, 8, 6);
+  for (const side of [-1, 1]) {
+    add(mirrorGeo, paint, side * 0.94, 0.98, 0.72, 1.1, 0.6, 0.5);   // a flattened pod, not a marble
+    add(box, dark, side * 0.84, 0.94, 0.74, 0.16, 0.04, 0.04);     // stalk
+  }
+  const pipeGeo = new THREE.CylinderGeometry(0.07, 0.08, 0.30, 10); pipeGeo.rotateX(Math.PI / 2);
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xb8bec8, roughness: 0.25, metalness: 1 });
+  add(pipeGeo, chrome, -0.62, 0.42, -2.20); add(pipeGeo, chrome, -0.44, 0.42, -2.20);
+  add(pipeGeo, chrome,  0.62, 0.42, -2.20); add(pipeGeo, chrome,  0.44, 0.42, -2.20);
+  add(box, dark, 0, 0.40, -2.12, 1.30, 0.10, 0.22);                // diffuser
+  for (const x of [-0.45, -0.15, 0.15, 0.45]) add(box, dark, x, 0.34, -2.10, 0.03, 0.14, 0.26);   // its fins
   // wheel arches: a dark lip half-buried in the fender, so the wheel sits in
   // a socket rather than against a flat side
   const archGeo = new THREE.CylinderGeometry(0.56, 0.56, 0.08, 20); archGeo.rotateZ(Math.PI / 2);
