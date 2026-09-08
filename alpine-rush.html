@@ -4009,6 +4009,38 @@ const Replay = {
     $('rpcar').textContent = this.car.name;
     $('rpspeed').textContent = this.speed + '×';
   },
+  /* the director: the nearest camera ahead of the followed car, kept until
+     the car is TV_PAST metres beyond it, then a hard cut to the next. The
+     lens keeps the car about the same size on screen (a long lens when it
+     is far), the look leads it a little, and both ease rather than snap. */
+  tv: null, tvFov: 40,
+  director(p, dt) {
+    if (FEAT[p.hint] === F_TUNNEL || !TV.length) {              // nothing sees into a bore
+      camMode = 0; updateCamera(dt, p); return;
+    }
+    let best = null, bd = Infinity;
+    for (const c of TV) {
+      let d = ((c.s - p.s) % TOTAL + TOTAL) % TOTAL;            // metres until the car reaches the camera
+      if (d > TOTAL - TV_PAST) d -= TOTAL;                       // just passed: still its shot
+      if (d < bd) { bd = d; best = c; }
+    }
+    const cut = best !== this.tv;
+    this.tv = best;
+    p.view.visible = true;
+    const sy = Math.sin(p.yaw), cy = Math.cos(p.yaw), lead = Math.min(0.15 * p.speed, 5);
+    _v.set(p.pos.x + sy * lead, p.groundY + 1.0, p.pos.z + cy * lead);
+    if (cut || this.seeking) camLook.copy(_v); else camLook.lerp(_v, approach(7, dt));
+    camera.position.set(best.x, best.y, best.z);
+    camera.lookAt(camLook);
+    const dist = camera.position.distanceTo(p.pos);
+    const want = clamp(2 * Math.atan(8.5 / Math.max(dist, 1)) * 57.3, 14, 62);
+    this.tvFov = (cut || this.seeking) ? want : this.tvFov + (want - this.tvFov) * approach(4, dt);
+    camera.fov = this.tvFov; camera.updateProjectionMatrix();
+    sun.target.position.copy(p.pos);
+    sun.position.set(p.pos.x + TOD.off[0], p.pos.y + TOD.off[1], p.pos.z + TOD.off[2]);
+    snowFall.position.set(camera.position.x, 0, camera.position.z);
+    snowFall.visible = !underCover(p.hint);
+  },
   update(dt) {
     if (this.playing) {
       this.t += dt * this.speed;
@@ -4031,10 +4063,10 @@ const Replay = {
       c.updateVisual(dt, Game.now);
     });
     const p = this.car;
-    if (this.seeking) { camPos.copy(p.pos).add(new THREE.Vector3(0, 6, -16)); camLook.copy(p.pos); }
+    if (this.seeking) { camPos.copy(p.pos).add(new THREE.Vector3(0, 6, -16)); camLook.copy(p.pos); this.tv = null; }
+    if (this.cam === 0) this.director(p, dt);
+    else { camMode = this.cam - 1; updateCamera(dt, p); }
     this.seeking = false;
-    camMode = this.cam === 0 ? 2 : this.cam - 1;                 // TV rides the cinema camera until it has a director
-    updateCamera(dt, p);
     mixAudio(p);
   }
 };
@@ -4148,6 +4180,34 @@ function toast(text, ms = 1600, color = '#ffcc33') {
 
 /* minimap */
 const mapCtx = el.map.getContext('2d');
+/* ---- the TV cameras. One every ~160 m of track on the outside of the
+   local bend, 23 m off the centreline and 4.5 m above whatever ground is
+   there - which under a bridge is the ravine floor, so that camera looks
+   up at the viaduct. A gallery gets its camera just outside the sill at
+   the top of the drop, looking through the pillars. None inside a bore:
+   the director rides the chase camera while a car is under a mountain,
+   and a pair stand outside each portal. Built from the accepted circuit,
+   so a seed always has the same cameras. ---- */
+let TV = [];
+const TV_EVERY = 160, TV_LAT = 23, TV_UP = 4.5, TV_PAST = 45;
+function buildTV() {
+  TV = [];
+  const add = (sl, lat, up) => {
+    const a = atDist(sl), x = a.x + a.rx * lat, z = a.z + a.rz * lat;
+    TV.push({ s: sl, x, y: Math.max(terrainAt(x, z, a.i), a.y) + up, z, i: a.i });
+  };
+  for (const f of FEATURES) if (f.type === 'tunnel') { add(f.s0 - 30, 20, 5); add(f.s1 + 30, -20, 5); }
+  for (let sl = 80; sl < TOTAL - 60; sl += TV_EVERY) {
+    const a = atDist(sl), f = FEAT[a.i];
+    if (f === F_TUNNEL || TV.some(c => Math.abs(c.s - sl) < 70)) continue;   // a portal camera has that stretch
+    if (f === F_GALLERY) { add(sl, FEAT_OPEN[a.i] * 14, 3.2); continue; }
+    // the outside of the bend: a right turn's (kappa > 0) outside is the left (+lat)
+    let turn = 0; for (let d = -40; d <= 40; d += 8) turn += atDist(sl + d).k;
+    add(sl, (turn >= 0 ? 1 : -1) * TV_LAT, TV_UP);
+  }
+  TV.sort((a, b) => a.s - b.s);
+}
+
 let MAPPTS = [];
 function buildMap() {
   MAPPTS = [];
@@ -4935,6 +4995,7 @@ function showTrackInfo() {
 function applySeed(str) {
   loadTrack(str);
   buildMap();
+  buildTV();
   cars.forEach((c, i) => c.placeOnGrid(i));
   cars.forEach(c => c.updateVisual(0.016, 0));
   camPos.set(player.pos.x - 18, player.pos.y + 9, player.pos.z - 22);
@@ -5194,7 +5255,7 @@ window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, S
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
                   driveTest, DRIVE, Records, Ghost, LapTrace, Tape, Replay, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
                   TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
-                  get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; },
+                  get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; }, get TV() { return TV; },
                   get FEATURES() { return FEATURES; }, FEAT, FEAT_K, STRUCT, placeFeatures, terrainAt, TUNNEL_CAP, BRIDGE_GORGE, TUBE, DECK, GALLERY, GALLERY_HILL, FEAT_OPEN, coverHeight };
 </script>
 </body>
