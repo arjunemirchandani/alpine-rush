@@ -189,7 +189,24 @@
     filter:drop-shadow(0 0 26px rgba(53,230,255,.45));
   }
   .sub{ font-size:11.5px; letter-spacing:.44em; color:rgba(53,230,255,.75); margin-top:9px; }
-  .keys{ display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:7px 16px; margin:26px 0 8px; text-align:left; }
+  /* tabs: the title card's rows, one pane at a time */
+  #tabs{ display:flex; justify-content:center; gap:4px; margin-top:22px; }
+  .tab{
+    pointer-events:auto; cursor:pointer; padding:10px 22px; font-family:inherit; font-size:10.5px;
+    letter-spacing:.26em; color:rgba(223,246,255,.45); background:transparent;
+    border:1px solid rgba(53,230,255,.18); border-bottom:none;
+  }
+  .tab:hover{ color:rgba(223,246,255,.8); }
+  .tab.sel{ color:var(--cy); background:rgba(53,230,255,.08); border-color:rgba(53,230,255,.5);
+            text-shadow:0 0 10px rgba(53,230,255,.5); font-weight:700; }
+  #panes{ border:1px solid rgba(53,230,255,.18); padding:16px 18px 18px; min-height:236px;
+          display:flex; flex-direction:column; justify-content:center; }
+  .pane{ display:none; }
+  .pane.sel{ display:block; }
+  .rowlbl{ font-size:9.5px; letter-spacing:.3em; color:rgba(223,246,255,.4); margin:14px 0 8px; }
+  .rowlbl:first-child{ margin-top:0; }
+  .rowlbl.dim{ color:rgba(223,246,255,.28); letter-spacing:.2em; margin-top:16px; }
+  .keys{ display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:9px 16px; margin:4px 0 4px; text-align:left; }
   .k{ display:flex; align-items:center; gap:9px; font-size:11.5px; color:rgba(223,246,255,.72); }
   .k kbd{
     min-width:26px; padding:3px 7px; text-align:center; font-family:inherit; font-size:10.5px;
@@ -224,7 +241,7 @@
   .hint{ margin-top:16px; font-size:10.5px; letter-spacing:.2em; color:rgba(223,246,255,.35); }
 
   /* difficulty picker */
-  #diff{ display:flex; gap:9px; justify-content:center; margin-top:20px; }
+  #diff{ display:flex; gap:9px; justify-content:center; }
   .dbtn{
     pointer-events:auto; cursor:pointer; padding:9px 20px; font-family:inherit; font-size:11px;
     letter-spacing:.2em; color:rgba(223,246,255,.6); background:transparent;
@@ -232,14 +249,14 @@
   }
   .dbtn.sel{ color:var(--ink); background:var(--cy); border-color:var(--cy); box-shadow:0 0 20px rgba(53,230,255,.5); font-weight:700; }
 
-  #timerow{ display:flex; gap:6px; justify-content:center; margin-top:9px; }
+  #timerow{ display:flex; gap:6px; justify-content:center; }
   .tbtn{ padding:7px 13px; font-size:10px; }
   #diff.locked .dbtn:not(.sel){ opacity:.3; pointer-events:none; }
-  #wxrow{ display:flex; gap:6px; justify-content:center; margin-top:6px; }
+  #wxrow{ display:flex; gap:6px; justify-content:center; }
   .wbtn{ padding:7px 11px; font-size:10px; }
   #wxrow.locked .dbtn{ opacity:.3; pointer-events:none; }
   /* mode picker */
-  #moderow{ display:flex; gap:9px; justify-content:center; margin-top:16px; }
+  #moderow{ display:flex; gap:9px; justify-content:center; }
   .mbtn{ padding:8px 18px; font-size:10.5px; }
   .mbtn.sel{ background:var(--am); border-color:var(--am); box-shadow:0 0 20px rgba(255,204,51,.45); }
   #seedin:disabled, #reroll:disabled{ opacity:.45; pointer-events:none; }
@@ -267,7 +284,7 @@
   #abandon:hover{ background:rgba(255,62,165,.10); }
   #abandon.arm{ background:var(--mg); border-color:var(--mg); color:var(--ink); font-weight:700; }
   /* seed picker */
-  #seedrow{ display:flex; gap:9px; justify-content:center; align-items:center; margin-top:14px; }
+  #seedrow{ display:flex; gap:9px; justify-content:center; align-items:center; margin-top:12px; }
   #seedrow .lbl{ letter-spacing:.24em; }
   #seedin{
     width:150px; padding:9px 12px; text-align:center; font-family:inherit; font-size:13px;
@@ -425,59 +442,84 @@
   <div class="card panel">
     <h1>ALPINE RUSH</h1>
     <div class="sub">3 LAPS · 3 RIVALS · ONE MOUNTAIN</div>
-    <div class="keys">
-      <div class="k"><kbd>W</kbd><kbd>↑</kbd> Throttle</div>
-      <div class="k"><kbd>S</kbd><kbd>↓</kbd> Brake / Reverse</div>
-      <div class="k"><kbd>A</kbd><kbd>D</kbd> Steer</div>
-      <div class="k"><kbd>SPACE</kbd> Handbrake drift</div>
-      <div class="k"><kbd>SHIFT</kbd> Boost</div>
-      <div class="k"><kbd>C</kbd> Camera</div>
-      <div class="k"><kbd>R</kbd> Respawn</div>
-      <div class="k"><kbd>P</kbd> Pause · <kbd>M</kbd> Mute</div>
+
+    <!-- the title, the tabs and START are always on screen; everything else
+         lives in a pane, so the card has room for a car picker -->
+    <div id="tabs">
+      <button class="tab sel" data-tab="race">RACE</button>
+      <button class="tab" data-tab="cond">CONDITIONS</button>
+      <button class="tab" data-tab="car">CAR</button>
+      <button class="tab" data-tab="keys">CONTROLS</button>
     </div>
-    <div id="diff">
-      <button class="dbtn" data-d="0">ROOKIE</button>
-      <button class="dbtn sel" data-d="1">PRO</button>
-      <button class="dbtn" data-d="2">ACE</button>
-    </div>
-    <div id="timerow">
-      <button class="dbtn tbtn sel" data-t="-1">AUTO</button>
-      <button class="dbtn tbtn" data-t="0">DAWN</button>
-      <button class="dbtn tbtn" data-t="1">DAY</button>
-      <button class="dbtn tbtn" data-t="2">GOLDEN</button>
-      <button class="dbtn tbtn" data-t="3">DUSK</button>
-    </div>
-    <div id="wxrow">
-      <button class="dbtn wbtn sel" data-w="-1">AUTO</button>
-      <button class="dbtn wbtn" data-w="0">CLEAR</button>
-      <button class="dbtn wbtn" data-w="1">SNOW</button>
-      <button class="dbtn wbtn" data-w="2">BLIZZARD</button>
-      <button class="dbtn wbtn" data-w="3">WHITEOUT</button>
-    </div>
-    <div id="moderow">
-      <button class="dbtn mbtn sel" data-m="race">SINGLE RACE</button>
-      <button class="dbtn mbtn" data-m="cup">CHAMPIONSHIP</button>
-    </div>
-    <div id="seedrow">
-      <span class="lbl" id="seedlbl">Circuit</span>
-      <input id="seedin" maxlength="12" spellcheck="false" autocomplete="off" value="ALPINE" />
-      <button class="dbtn" id="reroll">SHUFFLE</button>
-    </div>
-    <div id="featured" class="hide">
-      <span class="lbl">Featured</span>
-      <button class="dbtn fbtn" data-cup="JAKDA">JAKDA</button>
-      <button class="dbtn fbtn" data-cup="ELEGANT">ELEGANT</button>
-      <button class="dbtn fbtn" data-cup="GLACIER">GLACIER</button>
-      <button class="dbtn fbtn" data-cup="BLUEBIRD">BLUEBIRD</button>
-      <button class="dbtn fbtn" data-cup="BLACKOUT">BLACKOUT</button>
-    </div>
-    <div id="trackinfo"></div>
-    <div id="cupinfo" class="hide"></div>
-    <div id="recordrow">
-      <span class="lbl">Your record</span>
-      <b id="pbtime">--:--.---</b>
-      <button class="dbtn" id="ghosttoggle">GHOST ON</button>
-      <button class="dbtn" id="clearrec">CLEAR</button>
+    <div id="panes">
+      <div class="pane sel" data-pane="race">
+        <div id="moderow">
+          <button class="dbtn mbtn sel" data-m="race">SINGLE RACE</button>
+          <button class="dbtn mbtn" data-m="cup">CHAMPIONSHIP</button>
+        </div>
+        <div id="seedrow">
+          <span class="lbl" id="seedlbl">Circuit</span>
+          <input id="seedin" maxlength="12" spellcheck="false" autocomplete="off" value="ALPINE" />
+          <button class="dbtn" id="reroll">SHUFFLE</button>
+        </div>
+        <div id="featured" class="hide">
+          <span class="lbl">Featured</span>
+          <button class="dbtn fbtn" data-cup="JAKDA">JAKDA</button>
+          <button class="dbtn fbtn" data-cup="ELEGANT">ELEGANT</button>
+          <button class="dbtn fbtn" data-cup="GLACIER">GLACIER</button>
+          <button class="dbtn fbtn" data-cup="BLUEBIRD">BLUEBIRD</button>
+          <button class="dbtn fbtn" data-cup="BLACKOUT">BLACKOUT</button>
+        </div>
+        <div id="trackinfo"></div>
+        <div id="cupinfo" class="hide"></div>
+        <div id="recordrow">
+          <span class="lbl">Your record</span>
+          <b id="pbtime">--:--.---</b>
+          <button class="dbtn" id="ghosttoggle">GHOST ON</button>
+          <button class="dbtn" id="clearrec">CLEAR</button>
+        </div>
+      </div>
+      <div class="pane" data-pane="cond">
+        <div class="rowlbl">Difficulty</div>
+        <div id="diff">
+          <button class="dbtn" data-d="0">ROOKIE</button>
+          <button class="dbtn sel" data-d="1">PRO</button>
+          <button class="dbtn" data-d="2">ACE</button>
+        </div>
+        <div class="rowlbl">Time of day</div>
+        <div id="timerow">
+          <button class="dbtn tbtn sel" data-t="-1">AUTO</button>
+          <button class="dbtn tbtn" data-t="0">DAWN</button>
+          <button class="dbtn tbtn" data-t="1">DAY</button>
+          <button class="dbtn tbtn" data-t="2">GOLDEN</button>
+          <button class="dbtn tbtn" data-t="3">DUSK</button>
+        </div>
+        <div class="rowlbl">Weather</div>
+        <div id="wxrow">
+          <button class="dbtn wbtn sel" data-w="-1">AUTO</button>
+          <button class="dbtn wbtn" data-w="0">CLEAR</button>
+          <button class="dbtn wbtn" data-w="1">SNOW</button>
+          <button class="dbtn wbtn" data-w="2">BLIZZARD</button>
+          <button class="dbtn wbtn" data-w="3">WHITEOUT</button>
+        </div>
+        <div class="rowlbl dim">AUTO follows the circuit's seed · a cup always races its seed's conditions</div>
+      </div>
+      <div class="pane" data-pane="car">
+        <div class="rowlbl dim">Car selection is on its way</div>
+      </div>
+      <div class="pane" data-pane="keys">
+        <div class="keys">
+          <div class="k"><kbd>W</kbd><kbd>↑</kbd> Throttle</div>
+          <div class="k"><kbd>S</kbd><kbd>↓</kbd> Brake / Reverse</div>
+          <div class="k"><kbd>A</kbd><kbd>D</kbd> Steer</div>
+          <div class="k"><kbd>SPACE</kbd> Handbrake drift</div>
+          <div class="k"><kbd>SHIFT</kbd> Boost</div>
+          <div class="k"><kbd>C</kbd> Camera</div>
+          <div class="k"><kbd>R</kbd> Respawn</div>
+          <div class="k"><kbd>P</kbd> Pause · <kbd>M</kbd> Mute</div>
+        </div>
+        <div class="rowlbl dim">Drift to fill the boost meter · gamepad supported · Esc pauses</div>
+      </div>
     </div>
     <button class="btn" id="go">START ENGINE</button>
     <button class="dbtn hide" id="abandon">ABANDON CUP</button>
@@ -3761,6 +3803,15 @@ function showCupInfo() {
   const blurb = FEATURED[seed] ? `<div class="blurb">${FEATURED[seed]}</div>` : '';
   box.innerHTML = `${head}${blurb}${list}`;
 }
+/* ---- title tabs: one pane at a time, the last one remembered ---- */
+function setTab(name) {
+  document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('sel', b.dataset.tab === name));
+  document.querySelectorAll('#panes .pane').forEach(p => p.classList.toggle('sel', p.dataset.pane === name));
+  Records.setPref('tab', name);
+}
+document.querySelectorAll('#tabs .tab').forEach(b => b.addEventListener('click', () => setTab(b.dataset.tab)));
+setTab(['race', 'cond', 'car', 'keys'].includes(Records.data.prefs.tab) ? Records.data.prefs.tab : 'race');
+
 document.querySelectorAll('.mbtn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.m)));
 document.querySelectorAll('.fbtn').forEach(b => b.addEventListener('click', () => {
   seedIn.value = b.dataset.cup;
