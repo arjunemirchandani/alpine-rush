@@ -2391,7 +2391,8 @@ class Car {
 
     // ---- longitudinal
     const K = this.cls, H = 1 + (this.handicap || 0);
-    const vmax = TOP_SPEED * K.top * H * (wantBoost ? 1.16 : 1) * (onTrack ? 1 : Math.min(0.6 * K.off, 0.9))
+    const offH = this.handicap ? 1 + this.handicap * TECH.offH : 1;   // the snow forgives a handicapped car too
+    const vmax = TOP_SPEED * K.top * H * (wantBoost ? 1.16 : 1) * (onTrack ? 1 : Math.min(0.6 * K.off * offH, 0.9))
                * (this.speedMul || 1) * (1 + TOW.vmax * tow);
     let acc = 0;
     if (running) {
@@ -2414,7 +2415,7 @@ class Car {
     // ---- lateral grip: the whole drift model lives here
     // a rally car feels only part of the weather's grip loss
     const wxGrip = 1 - (1 - WX.grip) * K.wx;
-    let grip = (onTrack ? 5.4 * K.grip * H : 2.1 * K.off) * wxGrip;
+    let grip = (onTrack ? 5.4 * K.grip * H : 2.1 * K.off * offH) * wxGrip;
     if (c.hand && running) grip *= 0.15;
     else if (c.brake > 0.4 && Math.abs(vL) > 24) grip *= 0.62;   // trail-braking rotation
     if (wantBoost) grip *= 0.9;
@@ -2785,16 +2786,16 @@ class Car {
    the AI is corner-limited: a faster ceiling alone bought under 1 %, and
    grip alone sent it off the road, since in this model a corner's speed is
    set by yaw rate. Measured: +10 % laps 5.0 % faster than ACE, +15 % 6.8 %,
-   +20 % 7.8 %, off-track unchanged. The CONDITIONS tab says so. Raise it
-   here if LEGEND is still a formality. */
-const LEGEND_HANDICAP = 0.10;
+   +20 % 7.8 %, off-track unchanged; with the snow forgiving the car twice
+   the handicap (TECH.offH), +20 % is 8.9 %. The CONDITIONS tab says so. */
+const LEGEND_HANDICAP = 0.20;
 const DIFF = [
   { name: 'ROOKIE', skill: 0.55, speed: 0.88, tech: 0, handicap: 0 },
   { name: 'PRO',    skill: 0.84, speed: 0.97, tech: 0, handicap: 0 },
   { name: 'ACE',    skill: 1.00, speed: 1.05, tech: 0, handicap: 0 },
   { name: 'LEGEND', skill: 1.00, speed: 1.05, tech: 1, handicap: LEGEND_HANDICAP }
 ];
-const TECH = { fill: 0, exit: 1, lat: 1.0, brake: 0.70, brakeHi: 0.70, fillMax: 0.72, fillRoom: 2.5, hold: 0.22, band: 1, look: 1.0, planPow: 1 };   // planPow 2 over-plans and runs wide
+const TECH = { fill: 0, exit: 1, lat: 1.0, brake: 0.70, brakeHi: 0.70, fillMax: 0.72, fillRoom: 2.5, hold: 0.22, band: 1, look: 1.0, planPow: 1, offH: 2 };   // planPow 2 over-plans and runs wide; offH softens the snow for a handicapped car
 let diff = 1;
 
 const player = new Car({
@@ -3885,7 +3886,7 @@ const DIFF_NOTES = [
   'RIVALS AT 88 % · A FIRST DRIVE',
   'RIVALS AT 97 % · THE MEASURED BASELINE',
   'RIVALS AT 105 % · THE AI AT ITS CORNERING CEILING',
-  `ACE'S SKILL · BRAKES LATER, BOOSTS ON EXITS · <b>CARS +${Math.round(LEGEND_HANDICAP * 100)} % SPEED, POWER AND GRIP</b> — YOU ASKED FOR IT`
+  `ACE'S SKILL · BRAKES LATER, BOOSTS ON EXITS · <b>CARS +${Math.round(LEGEND_HANDICAP * 100)} % SPEED, POWER, GRIP, STEERING · THE SNOW FORGIVES THEM</b> — YOU ASKED FOR IT`
 ];
 function refreshSummary() {
   $('difflbl').innerHTML = DIFF_NOTES[diff] || '';
