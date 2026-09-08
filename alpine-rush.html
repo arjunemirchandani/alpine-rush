@@ -1842,7 +1842,7 @@ function buildTunnels() {
    lofted along the span, a concrete parapet at the wall line (its inner
    face just outside a car's flank at the wall), a steel rail on posts, and
    piers down to the ravine floor wherever it has fallen far enough. */
-const DECK = { edge: 11.9, parapet: [11.45, 11.9, 0.9], girder: [1.4, 2.6, 7.5], rail: 1.85, postEvery: 3, pierEvery: 26, pierMin: 6 };
+const DECK = { edge: 11.9, parapet: [11.45, 11.9, 0.45], girder: [1.4, 2.6, 7.5], rail: 1.05, postEvery: 3, pierEvery: 26, pierMin: 6 };   // a low kerb and a rail: the ravine stays in view from the chase camera
 function buildBridges() {
   // double-sided: the right-hand parapet and rail are mirrored profiles
   const concrete = new THREE.MeshLambertMaterial({ color: 0x9da3ab, side: THREE.DoubleSide });
