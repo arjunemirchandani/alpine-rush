@@ -1625,7 +1625,9 @@ const STYLE_INFO = {
   gt:     { name: 'GT',     blurb: 'THE ORIGINAL · BALANCED SHOULDERS, HIGH WING' },
   wedge:  { name: 'WEDGE',  blurb: 'LOW NOSE, BIG WING · VIPER\'S SHAPE' },
   coupe:  { name: 'COUPE',  blurb: 'ROUNDED, TALL CABIN, DUCKTAIL · FROST\'S SHAPE' },
-  muscle: { name: 'MUSCLE', blurb: 'WIDE, LONG BONNET, SCOOP · KAIJU\'S SHAPE' }
+  muscle: { name: 'MUSCLE', blurb: 'WIDE, LONG BONNET, SCOOP · KAIJU\'S SHAPE' },
+  super:  { name: 'SUPER',  blurb: 'MID-ENGINED · CAB FORWARD, WIDE HIPS, LOW' },
+  rally:  { name: 'RALLY',  blurb: 'THE HATCH · SHORT, TALL, ROOF SPOILER' }
 };
 const LIVERIES = [
   { name: 'ICE',     color: 0x1fd3ff, accent: 0xffffff },
@@ -1637,13 +1639,54 @@ const LIVERIES = [
   { name: 'ONYX',    color: 0x14161c, accent: 0x35e6ff },
   { name: 'PEARL',   color: 0xdfe6ee, accent: 0xff3ea5 }
 ];
+const BODY_SUPER = [                                   // cab forward, hips out back
+  { z:  2.20, w: 0.56, roofW: 0.44, yBot: 0.38, yTop: 0.50, r: 0.06 },
+  { z:  1.95, w: 0.90, roofW: 0.78, yBot: 0.34, yTop: 0.62, r: 0.10 },
+  { z:  1.45, w: 1.02, roofW: 0.88, yBot: 0.32, yTop: 0.74, r: 0.14 },
+  { z:  0.95, w: 1.00, roofW: 0.86, yBot: 0.32, yTop: 0.80, r: 0.14 },
+  { z:  0.30, w: 1.00, roofW: 0.84, yBot: 0.32, yTop: 0.84, r: 0.14 },
+  { z: -0.60, w: 1.06, roofW: 0.90, yBot: 0.32, yTop: 0.88, r: 0.16 },
+  { z: -1.40, w: 1.12, roofW: 0.96, yBot: 0.32, yTop: 0.88, r: 0.18 },
+  { z: -1.98, w: 1.02, roofW: 0.90, yBot: 0.36, yTop: 0.84, r: 0.12 },
+  { z: -2.20, w: 0.82, roofW: 0.74, yBot: 0.44, yTop: 0.74, r: 0.08 }
+];
+const CABIN_SUPER = [
+  { z:  1.15, w: 0.74, roofW: 0.62, yBot: 0.78, yTop: 0.82, r: 0.03 },
+  { z:  0.70, w: 0.78, roofW: 0.60, yBot: 0.78, yTop: 1.02, r: 0.08 },
+  { z:  0.35, w: 0.78, roofW: 0.58, yBot: 0.78, yTop: 1.12, r: 0.09 },
+  { z: -0.35, w: 0.78, roofW: 0.58, yBot: 0.78, yTop: 1.12, r: 0.09 },
+  { z: -0.80, w: 0.76, roofW: 0.56, yBot: 0.78, yTop: 1.00, r: 0.08 },
+  { z: -1.10, w: 0.72, roofW: 0.54, yBot: 0.78, yTop: 0.86, r: 0.03 }
+];
+const BODY_RALLY = [                                   // short overhangs, tall
+  { z:  1.95, w: 0.62, roofW: 0.54, yBot: 0.44, yTop: 0.66, r: 0.08 },
+  { z:  1.75, w: 0.88, roofW: 0.78, yBot: 0.36, yTop: 0.80, r: 0.12 },
+  { z:  1.35, w: 0.96, roofW: 0.84, yBot: 0.34, yTop: 0.92, r: 0.14 },
+  { z:  0.80, w: 0.94, roofW: 0.82, yBot: 0.34, yTop: 0.98, r: 0.14 },
+  { z:  0.10, w: 0.94, roofW: 0.82, yBot: 0.34, yTop: 1.00, r: 0.14 },
+  { z: -0.70, w: 0.96, roofW: 0.84, yBot: 0.34, yTop: 1.00, r: 0.14 },
+  { z: -1.30, w: 1.00, roofW: 0.86, yBot: 0.34, yTop: 0.98, r: 0.16 },
+  { z: -1.72, w: 0.92, roofW: 0.80, yBot: 0.38, yTop: 0.96, r: 0.12 },
+  { z: -1.92, w: 0.72, roofW: 0.64, yBot: 0.46, yTop: 0.90, r: 0.08 }
+];
+const CABIN_RALLY = [
+  { z:  0.90, w: 0.76, roofW: 0.66, yBot: 0.94, yTop: 0.98, r: 0.04 },
+  { z:  0.50, w: 0.80, roofW: 0.64, yBot: 0.94, yTop: 1.26, r: 0.10 },
+  { z:  0.15, w: 0.80, roofW: 0.62, yBot: 0.94, yTop: 1.40, r: 0.12 },
+  { z: -0.90, w: 0.80, roofW: 0.62, yBot: 0.94, yTop: 1.40, r: 0.12 },
+  { z: -1.40, w: 0.78, roofW: 0.62, yBot: 0.94, yTop: 1.30, r: 0.10 },
+  { z: -1.75, w: 0.70, roofW: 0.58, yBot: 0.94, yTop: 1.00, r: 0.04 }
+];
 /* wing: high (stays), big (wider, higher), lip (a ducktail), low (a wide
-   blade). track: wheel x per axle. lights: [x, y, z] for the headlamps. */
+   blade), roof (a blade off the roof's trailing edge). track: wheel x per
+   axle. lights: [x, y, z] for the headlamps. tail: where the rear parts sit. */
 const STYLES = {
-  gt:     { body: BODY,        cabin: CABIN,        wing: 'high', track: [0.98, 1.00], lights: [0.46, 0.56, 2.05], mirrors: [0.94, 0.98, 0.72] },
-  wedge:  { body: BODY_WEDGE,  cabin: CABIN_WEDGE,  wing: 'big',  track: [1.00, 1.02], lights: [0.44, 0.50, 2.06], mirrors: [0.96, 0.92, 0.45] },
-  coupe:  { body: BODY_COUPE,  cabin: CABIN_COUPE,  wing: 'lip',  track: [0.98, 1.00], lights: [0.44, 0.60, 2.02], mirrors: [0.94, 1.02, 0.74] },
-  muscle: { body: BODY_MUSCLE, cabin: CABIN_MUSCLE, wing: 'low',  track: [1.06, 1.10], lights: [0.56, 0.62, 2.10], mirrors: [1.02, 1.04, 0.10], scoop: true }
+  gt:     { body: BODY,        cabin: CABIN,        wing: 'high', track: [0.98, 1.00], lights: [0.46, 0.56, 2.05], mirrors: [0.94, 0.98, 0.72], tail: -2.12 },
+  wedge:  { body: BODY_WEDGE,  cabin: CABIN_WEDGE,  wing: 'big',  track: [1.00, 1.02], lights: [0.44, 0.50, 2.06], mirrors: [0.96, 0.92, 0.45], tail: -2.14 },
+  coupe:  { body: BODY_COUPE,  cabin: CABIN_COUPE,  wing: 'lip',  track: [0.98, 1.00], lights: [0.44, 0.60, 2.02], mirrors: [0.94, 1.02, 0.74], tail: -2.10 },
+  muscle: { body: BODY_MUSCLE, cabin: CABIN_MUSCLE, wing: 'low',  track: [1.06, 1.10], lights: [0.56, 0.62, 2.10], mirrors: [1.02, 1.04, 0.10], tail: -2.14, scoop: true },
+  super:  { body: BODY_SUPER,  cabin: CABIN_SUPER,  wing: 'lip',  track: [1.02, 1.10], lights: [0.48, 0.52, 2.06], mirrors: [0.98, 0.94, 0.85], tail: -2.16 },
+  rally:  { body: BODY_RALLY,  cabin: CABIN_RALLY,  wing: 'roof', track: [0.96, 0.98], lights: [0.42, 0.62, 1.88], mirrors: [0.92, 1.06, 0.55], tail: -1.88 }
 };
 /* one geometry from many placed parts, so a car's static bodywork is one
    draw call per material instead of one per piece. Positions go through the
@@ -1726,7 +1769,10 @@ function buildCar(color, accent, style = 'gt') {
     add(box, dark, -0.72, big ? 1.06 : 1.05, -1.90, 0.10, big ? 0.52 : 0.42, 0.20);   // stays, swept
     add(box, dark,  0.72, big ? 1.06 : 1.05, -1.90, 0.10, big ? 0.52 : 0.42, 0.20);
   } else if (S.wing === 'lip') {
-    add(chamferBox(1.40, 0.06, 0.26, 0.02), trim, 0, 0.90, -2.02, 1, 1, 1, -0.35, 0, 0);   // ducktail
+    add(chamferBox(1.40, 0.06, 0.26, 0.02), trim, 0, 0.90, S.tail + 0.10, 1, 1, 1, -0.35, 0, 0);   // ducktail
+  } else if (S.wing === 'roof') {
+    add(chamferBox(1.30, 0.05, 0.30, 0.02), trim, 0, 1.44, -1.62, 1, 1, 1, 0.08, 0, 0);   // off the hatch
+    add(box, dark, -0.50, 1.38, -1.58, 0.06, 0.10, 0.14); add(box, dark, 0.50, 1.38, -1.58, 0.06, 0.10, 0.14);
   } else {
     add(chamferBox(2.10, 0.07, 0.40, 0.03), trim, 0, 1.06, -2.00);   // a low, wide blade
     add(box, dark, -0.85, 0.98, -1.96, 0.10, 0.14, 0.18); add(box, dark, 0.85, 0.98, -1.96, 0.10, 0.14, 0.18);
@@ -1740,10 +1786,11 @@ function buildCar(color, accent, style = 'gt') {
     add(box, dark, side * (mx - 0.10), my - 0.04, mz + 0.02, 0.16, 0.04, 0.04);   // stalk
   }
   const pipeGeo = new THREE.CylinderGeometry(0.07, 0.08, 0.30, 10); pipeGeo.rotateX(Math.PI / 2);
-  add(pipeGeo, chrome, -0.62, 0.42, -2.20); add(pipeGeo, chrome, -0.44, 0.42, -2.20);
-  add(pipeGeo, chrome,  0.62, 0.42, -2.20); add(pipeGeo, chrome,  0.44, 0.42, -2.20);
-  add(box, dark, 0, 0.40, -2.12, 1.30, 0.10, 0.22);                // diffuser
-  for (const x of [-0.45, -0.15, 0.15, 0.45]) add(box, dark, x, 0.34, -2.10, 0.03, 0.14, 0.26);   // its fins
+  const tz = S.tail;
+  add(pipeGeo, chrome, -0.62, 0.42, tz - 0.08); add(pipeGeo, chrome, -0.44, 0.42, tz - 0.08);
+  add(pipeGeo, chrome,  0.62, 0.42, tz - 0.08); add(pipeGeo, chrome,  0.44, 0.42, tz - 0.08);
+  add(box, dark, 0, 0.40, tz, 1.30, 0.10, 0.22);                    // diffuser
+  for (const x of [-0.45, -0.15, 0.15, 0.45]) add(box, dark, x, 0.34, tz + 0.02, 0.03, 0.14, 0.26);   // its fins
   // wheel arches: a dark lip half-buried in the fender, so the wheel sits in
   // a socket rather than against a flat side
   const archGeo = new THREE.CylinderGeometry(0.56, 0.56, 0.08, 20); archGeo.rotateZ(Math.PI / 2);
@@ -1752,8 +1799,8 @@ function buildCar(color, accent, style = 'gt') {
   const [lx, ly, lz] = S.lights;
   add(box, head, -lx, ly, lz, 0.34, 0.12, 0.06);
   add(box, head,  lx, ly, lz, 0.34, 0.12, 0.06);
-  add(box, brakeMat, -0.46, 0.62, -2.12, 0.40, 0.14, 0.06);
-  add(box, brakeMat,  0.46, 0.62, -2.12, 0.40, 0.14, 0.06);
+  add(box, brakeMat, -0.46, 0.62, tz, 0.40, 0.14, 0.06);
+  add(box, brakeMat,  0.46, 0.62, tz, 0.40, 0.14, 0.06);
   for (const [mat, list] of parts) {
     const m = new THREE.Mesh(mergeParts(list), mat);
     m.castShadow = true; g.add(m);
@@ -1780,9 +1827,9 @@ function buildCar(color, accent, style = 'gt') {
     new THREE.ConeGeometry(0.30, 1.5, 8),
     new THREE.MeshBasicMaterial({ color: 0x66e9ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false })
   );
-  flame.rotation.x = Math.PI / 2; flame.position.set(0, 0.48, -2.5); g.add(flame);
+  flame.rotation.x = Math.PI / 2; flame.position.set(0, 0.48, tz - 0.38); g.add(flame);
   const flame2 = flame.clone(); flame2.material = flame.material.clone(); g.add(flame2);
-  flame2.position.set(0, 0.48, -2.5); flame2.scale.set(0.55, 1.6, 0.55);
+  flame2.position.set(0, 0.48, tz - 0.38); flame2.scale.set(0.55, 1.6, 0.55);
 
   // blob shadow helper (keeps contact grounded even at shadow-map edges)
   const blob = new THREE.Mesh(
