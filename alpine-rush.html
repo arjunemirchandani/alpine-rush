@@ -3821,6 +3821,16 @@ function paintMap(g, heat, live) {
     const p = MAPPTS.to(player.pos.x, player.pos.z); g.lineTo(p[0], p[1]);
     g.stroke();
   }
+  // structures as casings under the core line: a tunnel's stretch runs
+  // through a dark tube, a bridge's over a pale deck
+  for (const f of FEATURES) {
+    g.strokeStyle = f.type === 'tunnel' ? 'rgba(8,12,20,.85)' : 'rgba(223,246,255,.6)'; g.lineWidth = 9;
+    g.beginPath();
+    let p = MAPPTS.to(PX[f.i0], PZ[f.i0]); g.moveTo(p[0], p[1]);
+    for (let i = Math.ceil(f.i0 / 8); i * 8 <= f.i1; i++) g.lineTo(MAPPTS[i][0], MAPPTS[i][1]);
+    p = MAPPTS.to(PX[f.i1], PZ[f.i1]); g.lineTo(p[0], p[1]);
+    g.stroke();
+  }
   // the core line is stroked one segment at a time so its colour can follow
   // the height of the road, and this lap's heat trace against the ghost:
   // green where the stretch gained time on the record, magenta where it lost
