@@ -276,6 +276,8 @@
   #timerow{ display:flex; gap:6px; justify-content:center; }
   .tbtn{ padding:7px 13px; font-size:10px; }
   #diff.locked .dbtn:not(.sel){ opacity:.3; pointer-events:none; }
+  #difflbl{ margin-top:8px; min-height:11px; }
+  #difflbl b{ color:var(--am); font-weight:700; }
   #wxrow{ display:flex; gap:6px; justify-content:center; }
   .wbtn{ padding:7px 11px; font-size:10px; }
   #wxrow.locked .dbtn{ opacity:.3; pointer-events:none; }
@@ -512,6 +514,7 @@
           <button class="dbtn" data-d="2">ACE</button>
           <button class="dbtn" data-d="3">LEGEND</button>
         </div>
+        <div id="difflbl" class="rowlbl dim"></div>
         <div class="rowlbl">Time of day</div>
         <div id="timerow">
           <button class="dbtn tbtn sel" data-t="-1">AUTO</button>
@@ -2387,12 +2390,12 @@ class Car {
     this.tow = tow; this.towCar = towCar;
 
     // ---- longitudinal
-    const K = this.cls;
-    const vmax = TOP_SPEED * K.top * (wantBoost ? 1.16 : 1) * (onTrack ? 1 : Math.min(0.6 * K.off, 0.9))
+    const K = this.cls, H = 1 + (this.handicap || 0);
+    const vmax = TOP_SPEED * K.top * H * (wantBoost ? 1.16 : 1) * (onTrack ? 1 : Math.min(0.6 * K.off, 0.9))
                * (this.speedMul || 1) * (1 + TOW.vmax * tow);
     let acc = 0;
     if (running) {
-      if (c.throttle > 0) acc += ENGINE * K.accel * c.throttle * Math.max(0, 1 - Math.max(0, vL) / vmax);
+      if (c.throttle > 0) acc += ENGINE * K.accel * H * c.throttle * Math.max(0, 1 - Math.max(0, vL) / vmax);
       if (wantBoost) acc += 21;
       if (c.throttle > 0) acc += TOW.accel * tow;            // the tow only pulls under power
       if (c.brake > 0) acc -= (vL > 0.6 ? BRAKE_A : REVERSE_A) * c.brake;
@@ -2411,7 +2414,7 @@ class Car {
     // ---- lateral grip: the whole drift model lives here
     // a rally car feels only part of the weather's grip loss
     const wxGrip = 1 - (1 - WX.grip) * K.wx;
-    let grip = (onTrack ? 5.4 * K.grip : 2.1 * K.off) * wxGrip;
+    let grip = (onTrack ? 5.4 * K.grip * H : 2.1 * K.off) * wxGrip;
     if (c.hand && running) grip *= 0.15;
     else if (c.brake > 0.4 && Math.abs(vL) > 24) grip *= 0.62;   // trail-braking rotation
     if (wantBoost) grip *= 0.9;
@@ -2429,7 +2432,10 @@ class Car {
     const over = clamp((Math.abs(this.drift) - 0.85) / 0.45, 0, 1);      // 49 deg .. 74 deg
     const align = (c.hand && running) ? lerp(0.38, 2.4, over) : lerp(1.55, 3.0, over);
     const steerAuth = (c.hand && running ? 1.62 : 1) * (1 - over * 0.55); // lock reduces near the limit
-    let target = c.steer * BASE_YAW * sf * dir * steerAuth + this.drift * align;
+    // a handicapped car also turns harder: in this model a corner's speed is
+    // set by yaw rate (radius = speed / yaw rate), so extra grip alone never
+    // reaches the corners, it only aligns a car that cannot turn any tighter
+    let target = c.steer * BASE_YAW * H * sf * dir * steerAuth + this.drift * align;
     target = clamp(target, -3.3, 3.3);
     this.yawRate += (target - this.yawRate) * approach(10, dt);
     this.yaw += this.yawRate * dt;
@@ -2549,7 +2555,7 @@ class Car {
     const sp = this.speed;
 
     // aim at a point down the racing line
-    const look = clamp(10 + sp * 0.66, 16, 64);
+    const look = clamp(10 + sp * 0.66, 16, 64) * (this.tech ? TECH.look : 1);
     const a = atDist(this.s + look);
     const wander = Math.sin(Game.now * this.wf + this.wp) * (1 - this.skill) * 4.2;
     let off = a.off * this.lineBias + wander;
@@ -2589,7 +2595,7 @@ class Car {
     // car runs wide and loses more than the ambition gains. Ceiling ~25.5 for
     // the best drivers; their edge comes from line-holding and top speed.
     const latGrip = (17.5 + this.skill * 8) * (1 - (1 - WX.grip) * this.cls.wx) * this.cls.grip   // the car it is driving
-                  * (this.tech ? TECH.lat : 1);
+                  * (this.tech ? TECH.lat : 1) * Math.pow(1 + (this.handicap || 0), TECH.planPow);   // yaw x H turns radius v/w: capacity ~ H^2
     let vT = Math.sqrt(latGrip / k);
     // already wide? recover first. Without this, a high-skill driver plans an
     // ambitious corner speed, runs wide, and plans the next one just as fast —
@@ -2603,7 +2609,7 @@ class Car {
       const gap = (player.progress - this.progress) / TOTAL;
       band = 1 + clamp(gap, -0.09, 0.09) * (gap > 0 ? 0.85 : 0.45);
     }
-    vT = Math.min(vT, TOP_SPEED * this.cls.top * this.speedMul * band);
+    vT = Math.min(vT, TOP_SPEED * this.cls.top * (1 + (this.handicap || 0)) * this.speedMul * band);
 
     if (sp > vT + 1.5) { c.brake = clamp((sp - vT) * 0.2, 0, 1); c.throttle = 0; }
     else { c.throttle = 1; c.brake = 0; }
@@ -2630,7 +2636,7 @@ class Car {
     // straight. Fire there from a lower meter, hold it otherwise, and never
     // sit on a full meter.
     if (tech * TECH.exit > 0) {
-      const ceiling = TOP_SPEED * this.cls.top * this.speedMul;
+      const ceiling = TOP_SPEED * this.cls.top * (1 + (this.handicap || 0)) * this.speedMul;
       const exiting = k < 0.006 && Math.abs(atDist(this.s + 45).k) < 0.0038 && sp < ceiling * 0.9 && Math.abs(ang) < 0.3;
       c.boost = (exiting && this.boostMeter > 0.18) || (this.boostMeter > 0.9 && k < 0.0038 && Math.abs(ang) < 0.22);
     }
@@ -2773,13 +2779,22 @@ class Car {
    medium corners to bank boost, the human trick, made the AI slower: it
    slides wide because it never learnt to steer through a slide. TECH holds
    the knobs so the harness can switch each one. */
+/* LEGEND's technique alone was measured at 2.3 % over ACE; a player who
+   drifts for profit is 15 % up on ACE. The rest is a declared handicap on
+   the whole car - top speed, engine, grip and steering authority - because
+   the AI is corner-limited: a faster ceiling alone bought under 1 %, and
+   grip alone sent it off the road, since in this model a corner's speed is
+   set by yaw rate. Measured: +10 % laps 5.0 % faster than ACE, +15 % 6.8 %,
+   +20 % 7.8 %, off-track unchanged. The CONDITIONS tab says so. Raise it
+   here if LEGEND is still a formality. */
+const LEGEND_HANDICAP = 0.10;
 const DIFF = [
-  { name: 'ROOKIE', skill: 0.55, speed: 0.88, tech: 0 },
-  { name: 'PRO',    skill: 0.84, speed: 0.97, tech: 0 },
-  { name: 'ACE',    skill: 1.00, speed: 1.05, tech: 0 },
-  { name: 'LEGEND', skill: 1.00, speed: 1.05, tech: 1 }
+  { name: 'ROOKIE', skill: 0.55, speed: 0.88, tech: 0, handicap: 0 },
+  { name: 'PRO',    skill: 0.84, speed: 0.97, tech: 0, handicap: 0 },
+  { name: 'ACE',    skill: 1.00, speed: 1.05, tech: 0, handicap: 0 },
+  { name: 'LEGEND', skill: 1.00, speed: 1.05, tech: 1, handicap: LEGEND_HANDICAP }
 ];
-const TECH = { fill: 0, exit: 1, lat: 1.0, brake: 0.70, brakeHi: 0.70, fillMax: 0.72, fillRoom: 2.5, hold: 0.22, band: 1 };
+const TECH = { fill: 0, exit: 1, lat: 1.0, brake: 0.70, brakeHi: 0.70, fillMax: 0.72, fillRoom: 2.5, hold: 0.22, band: 1, look: 1.0, planPow: 1 };   // planPow 2 over-plans and runs wide
 let diff = 1;
 
 const player = new Car({
@@ -2802,6 +2817,7 @@ function applyDifficulty() {
     r.skill = clamp(d.skill + (i - 1) * 0.05, 0.2, 1);
     r.speedMul = d.speed + (i - 1) * 0.012;
     r.tech = d.tech || 0;
+    r.handicap = d.handicap || 0;             // a declared multiplier on top speed, engine and grip
   });
 }
 
@@ -3865,7 +3881,14 @@ document.querySelectorAll('#diff .dbtn').forEach(b => b.addEventListener('click'
 /* ---- circuit seeding ---- */
 const seedIn = $('seedin'), trackInfoEl = $('trackinfo');
 
+const DIFF_NOTES = [
+  'RIVALS AT 88 % · A FIRST DRIVE',
+  'RIVALS AT 97 % · THE MEASURED BASELINE',
+  'RIVALS AT 105 % · THE AI AT ITS CORNERING CEILING',
+  `ACE'S SKILL · BRAKES LATER, BOOSTS ON EXITS · <b>CARS +${Math.round(LEGEND_HANDICAP * 100)} % SPEED, POWER AND GRIP</b> — YOU ASKED FOR IT`
+];
 function refreshSummary() {
+  $('difflbl').innerHTML = DIFF_NOTES[diff] || '';
   const t = trackInfo, sep = ' · ';
   const live = mode === 'cup' && Cup.active && !Cup.done;
   const where = live ? `CUP <b>${Cup.data.seed}</b>${sep}ROUND <b>${Cup.data.round + 1}</b>/${CUP_ROUNDS}${sep}${t.seed}`
