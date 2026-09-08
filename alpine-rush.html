@@ -627,6 +627,7 @@ import * as THREE from 'three';
 const LAPS        = 3;
 const HALF_W      = 10;      // road half width (m)
 const WALL_L      = 22;      // lateral distance of the snow wall
+const STRUCT_WALL = 10.45;   // tunnel wall / bridge parapet: the car's centre stops here, its flank at 11.4
 const N           = 1500;    // centreline samples
 const TOP_SPEED   = 76;      // m/s  (~274 km/h, ~317 with boost)
 const KMH         = 3.6;
@@ -2627,11 +2628,14 @@ class Car {
     this.pos.x += this.vx * dt;
     this.pos.z += this.vz * dt;
 
-    // ---- snow wall
+    // ---- snow wall; or, through a structure, the tunnel wall or the bridge
+    // parapet right at the road's edge. Off while the drive test judges a
+    // candidate, so a seed accepts exactly the circuit it always did.
     const q2 = nearLocal(this.pos.x, this.pos.z, this.hint, 46);
     this.hint = q2.i;
-    if (Math.abs(q2.lat) > WALL_L) {
-      const sgn = Math.sign(q2.lat), over = Math.abs(q2.lat) - WALL_L;
+    const wallL = FEAT[q2.i] && (!Game.testing || TECH.wallsInTest) ? STRUCT_WALL : WALL_L;
+    if (Math.abs(q2.lat) > wallL) {
+      const sgn = Math.sign(q2.lat), over = Math.abs(q2.lat) - wallL;
       const nx = RX[q2.i] * sgn, nz = RZ[q2.i] * sgn;
       this.pos.x -= nx * over; this.pos.z -= nz * over;
       const vOut = this.vx * nx + this.vz * nz;
@@ -3086,7 +3090,7 @@ const REH_SCRIPTS = [
    with every rival rehearsing it took six seconds mid-race. It gets a
    lighter set, half as often: close enough for a projected gap. */
 const REH_LITE = REH_SCRIPTS.filter(sc => ['line', 'lineB', 'inS', 'outS', 'lineS'].includes(sc.name));
-const TECH = { fill: 0, exit: 1, lat: 1.0, brake: 0.70, brakeHi: 0.70, fillMax: 0.72, fillRoom: 2.5, hold: 0.22, band: 1, look: 1.0, planPow: 1, offH: 2, avoidK: 1, aiCollide: 1, boostH: 0, rehearse: 1 };   // planPow 2 over-plans and runs wide; offH softens the snow for a handicapped car
+const TECH = { fill: 0, exit: 1, lat: 1.0, brake: 0.70, brakeHi: 0.70, fillMax: 0.72, fillRoom: 2.5, hold: 0.22, band: 1, look: 1.0, planPow: 1, offH: 2, avoidK: 1, aiCollide: 1, boostH: 0, rehearse: 1, wallsInTest: 0 };   // planPow 2 over-plans and runs wide; offH softens the snow for a handicapped car
 let diff = 1;
 
 const player = new Car({
