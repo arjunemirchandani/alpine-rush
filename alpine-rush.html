@@ -1025,8 +1025,12 @@ addEventListener('resize', () => {
    because it is the same world. The shadow map is built once per frame, not
    once per render() call. ---- */
 const MIRROR_W = 512, MIRROR_H = 160, MIRROR_PARTICLE_ALPHA = 0.15;
+// A long lens, not a wide one: at a 3.2:1 frame, 58 deg vertical was 121 deg
+// across and a rival at 50 m was a speck. 30 deg is ~82 deg across, enough to
+// see a car alongside, and a rival at 50 m appears twice the size.
+const MIRROR_FOV = 30;
 const mirrorRT = new THREE.WebGLRenderTarget(MIRROR_W, MIRROR_H, { samples: 2 });
-const rearCam = new THREE.PerspectiveCamera(58, MIRROR_W / MIRROR_H, 0.6, 2500);
+const rearCam = new THREE.PerspectiveCamera(MIRROR_FOV, MIRROR_W / MIRROR_H, 0.6, 2500);
 const mirrorScene = new THREE.Scene();
 const mirrorQuadGeo = new THREE.PlaneGeometry(2, 2);
 { const uv = mirrorQuadGeo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i)); }   // a mirror flips
