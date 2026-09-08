@@ -401,6 +401,13 @@ rehearsing rivals lap 21 % faster than ACE instead of 11 %, and spend 0.8 % of t
 road instead of 4.6 % — every slice they drive was tried first. With no handicap at all, rehearsal
 alone is 16 % faster than ACE on JAKDA and 21 % on the hairpin circuit.
 
+Three rivals rehearsing the same scripts with the same scorer converge on the same plan and finish
+as a train, so each has its own way of rehearsing: VIPER replans often on a short horizon and scores
+exit speed over safety; FROST looks further ahead, scores the snow harshly and values banked boost;
+KAIJU rehearses least, holds a slide longest and barely counts the meter. Same engine, three
+drivers — and on the harness KAIJU, rehearsing least, is the quickest through the hairpins in the
+muscle car, while careful FROST in the coupé is the slowest.
+
 So the declared handicap came *down*: LEGEND's rivals run **+10 %** in top speed, engine, grip and
 steering, and the snow slows them less — and the CONDITIONS tab says so in as many words. Finding the right handicap was its own
 lesson: +10 % top speed alone bought under 1 % (the AI rarely reaches the ceiling), and grip alone
