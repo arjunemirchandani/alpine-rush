@@ -1812,6 +1812,60 @@ function buildTunnels() {
   }
 }
 
+/* ---------------------------- 9c. bridges ------------------------------ */
+/* A bridge carries the road as it is: the sunlit ribbon, its lines, the
+   weather. What is built is everything under and beside it - a box girder
+   lofted along the span, a concrete parapet at the wall line (its inner
+   face just outside a car's flank at the wall), a steel rail on posts, and
+   piers down to the ravine floor wherever it has fallen far enough. */
+const DECK = { edge: 11.9, parapet: [11.45, 11.9, 0.9], girder: [1.4, 2.6, 7.5], rail: 1.85, postEvery: 3, pierEvery: 26, pierMin: 6 };
+function buildBridges() {
+  const concrete = new THREE.MeshLambertMaterial({ color: 0x9da3ab });
+  const steel = new THREE.MeshLambertMaterial({ color: 0x2b3139 });
+  const [g1, g2, gw] = DECK.girder, [pIn, pOut, pH] = DECK.parapet, E = DECK.edge;
+  const deckProf = [[-HALF_W, 0.04], [-E, 0.04], [-E, -g1], [-gw, -g2], [gw, -g2], [E, -g1], [E, 0.04], [HALF_W, 0.04]];
+  const postGeo = new THREE.BoxGeometry(0.1, DECK.rail - pH + 0.1, 0.1), pierGeo = new THREE.BoxGeometry(1, 1, 1);
+  const M = new THREE.Matrix4(), P = new THREE.Vector3(), Qt = new THREE.Quaternion(), S = new THREE.Vector3();
+
+  for (const f of FEATURES) {
+    if (f.type !== 'bridge') continue;
+    const deck = new THREE.Mesh(loftTrack(f.i0, f.i1, deckProf), concrete);
+    deck.castShadow = true; deck.receiveShadow = true;
+    world.add(deck);
+    const posts = [], piers = [];
+    for (const side of [1, -1]) {
+      const sg = l => side * l;
+      world.add(new THREE.Mesh(loftTrack(f.i0, f.i1,
+        [[sg(pIn), 0.04], [sg(pIn), pH], [sg(pOut), pH], [sg(pOut), 0.04]]), concrete));
+      const r = (pIn + pOut) / 2;
+      world.add(new THREE.Mesh(loftTrack(f.i0, f.i1,
+        [[sg(r - 0.08), DECK.rail - 0.1], [sg(r - 0.08), DECK.rail], [sg(r + 0.08), DECK.rail], [sg(r + 0.08), DECK.rail - 0.1]]), steel));
+      for (let sl = f.s0 + 1.5; sl < f.s1 - 1; sl += DECK.postEvery) {
+        const a = atDist(sl);
+        posts.push([a.x + a.rx * sg(r), a.y + pH + (DECK.rail - pH) / 2, a.z + a.rz * sg(r), Math.atan2(a.tx, a.tz)]);
+      }
+    }
+    for (let sl = f.s0 + DECK.pierEvery / 2; sl < f.s1 - 8; sl += DECK.pierEvery) {
+      const a = atDist(sl), floor = terrainAt(a.x, a.z, a.i) - 1.5;
+      const drop = a.y - g2 - floor;
+      if (drop < DECK.pierMin) continue;
+      piers.push([a.x, a.y - g2 - drop / 2, a.z, Math.atan2(a.tx, a.tz), drop]);
+    }
+    const inst = (geo, mat, list, size) => {
+      const m = new THREE.InstancedMesh(geo, mat, list.length);
+      list.forEach((d, k) => {
+        P.set(d[0], d[1], d[2]); Qt.setFromAxisAngle(UP, d[3]); size(d);
+        M.compose(P, Qt, S); m.setMatrixAt(k, M);
+      });
+      m.instanceMatrix.needsUpdate = true;
+      m.castShadow = true;
+      world.add(m);
+    };
+    inst(postGeo, steel, posts, () => S.set(1, 1, 1));
+    inst(pierGeo, concrete, piers, d => S.set(2 * gw * 0.9, d[4], 2.6));       // a wall pier: wide across the road, thin along it
+  }
+}
+
 /* One call rebuilds the entire circuit from a seed string. */
 let trackInfo = null;
 let timeChoice = -1;                       // -1 = follow the seed
@@ -1832,6 +1886,7 @@ function loadTrack(seedStr) {
   buildStartLine();
   buildScenery();
   buildTunnels();
+  buildBridges();
   return trackInfo;
 }
 
@@ -4673,7 +4728,7 @@ window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, S
                   driveTest, DRIVE, Records, Ghost, LapTrace, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
                   TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; },
-                  get FEATURES() { return FEATURES; }, FEAT, FEAT_K, STRUCT, placeFeatures, terrainAt, TUNNEL_CAP, BRIDGE_GORGE, TUBE };
+                  get FEATURES() { return FEATURES; }, FEAT, FEAT_K, STRUCT, placeFeatures, terrainAt, TUNNEL_CAP, BRIDGE_GORGE, TUBE, DECK };
 </script>
 </body>
 </html>
