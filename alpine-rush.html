@@ -2705,12 +2705,14 @@ const Sfx = {
     return { out, flt, oscs, nf, ng, base: vol };
   },
 
-  engineUpdate(eng, rpm, throttle, vol) {
+  /* rate: playback rate for a replay - pitches the note like a tape run
+     slow or fast (the filters keep their place, so the timbre stays) */
+  engineUpdate(eng, rpm, throttle, vol, rate = 1) {
     if (!this.ok) return;
-    const t = this.ctx.currentTime, f = 40 + rpm * 190;
+    const t = this.ctx.currentTime, f = (40 + rpm * 190) * rate;
     for (const s of eng.oscs) s.o.frequency.setTargetAtTime(f * s.mul, t, 0.035);
     eng.flt.frequency.setTargetAtTime(420 + rpm * 2400 + throttle * 1700, t, 0.05);
-    eng.nf.frequency.setTargetAtTime(500 + rpm * 1800, t, 0.05);
+    eng.nf.frequency.setTargetAtTime((500 + rpm * 1800) * rate, t, 0.05);
     eng.ng.gain.setTargetAtTime(0.03 + throttle * 0.075, t, 0.06);
     eng.out.gain.setTargetAtTime(vol * (0.55 + throttle * 0.45), t, 0.06);
   },
@@ -4094,7 +4096,9 @@ const Replay = {
     // the mix follows the car only while it moves: paused, or at the end of
     // the tape, the engine and the tyres fade out instead of holding their
     // last note (raceOut is the same fade the flag uses)
-    if (this.playing) { mixAudio(p); this.quiet = false; }
+    // slow motion pitches the engine down, fast forward up - by the square
+    // root of the rate, so a quarter speed is an octave, not two
+    if (this.playing) { mixAudio(p, Math.sqrt(this.speed)); this.quiet = false; }
     else if (!this.quiet) { Sfx.raceOut(); this.quiet = true; }
   }
 };
@@ -4876,14 +4880,14 @@ function driftSnow(dt) {
 }
 /* the mix around one car: its engine, the nearest rival's, its tyres, the
    wind for its speed and the weather, the walls when it is under cover */
-function mixAudio(p) {
+function mixAudio(p, rate = 1) {
   if (!Sfx.ok || Sfx.muted) return;
-  Sfx.engineUpdate(Sfx.engine, p.rpm, p.ctl.throttle, 0.34);
+  Sfx.engineUpdate(Sfx.engine, p.rpm, p.ctl.throttle, 0.34, rate);
   let near = null, nd = 1e9;
   for (const r of cars) { if (r === p) continue; const d = r.pos.distanceTo(p.pos); if (d < nd) { nd = d; near = r; } }
-  Sfx.engineUpdate(Sfx.rival, near.rpm, near.ctl.throttle, clamp(1 - nd / 55, 0, 1) * 0.16);
+  Sfx.engineUpdate(Sfx.rival, near.rpm, near.ctl.throttle, clamp(1 - nd / 55, 0, 1) * 0.16, rate);
   const slip = clamp((Math.abs(p.drift) - 0.12) * 2.4, 0, 1) * clamp(p.speed / 22, 0, 1);
-  Sfx.set(Sfx.screech, p.onTrack ? slip * 0.16 : 0, 1250 + slip * 900);
+  Sfx.set(Sfx.screech, p.onTrack ? slip * 0.16 : 0, (1250 + slip * 900) * rate);
   Sfx.set(Sfx.rumble, p.onTrack ? 0 : clamp(p.speed / 40, 0, 1) * 0.2);
   // the weather's howl sits under the speed wind and gusts on the same
   // slow sines the physics leans on the car with
