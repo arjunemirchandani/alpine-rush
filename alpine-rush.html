@@ -1239,22 +1239,22 @@ function renderFrame() {
    peaks and throws the long shadows that sell golden hour. Fog is always
    pulled toward the sky's horizon colour or the two visibly disagree. */
 const TIMES = [
-  { name: 'DAWN', shadowTint: 0x7b85bc, shadowAmt: 0.44, cloud: '#f4dad2', disc: 420, discCol: 0xffd0b8,
+  { name: 'DAWN', shadowTint: 0x7b85bc, shadowAmt: 0.44, lamps: 0.5, cloud: '#f4dad2', disc: 420, discCol: 0xffd0b8,
     off: [-300, 200, 250], sun: 0xffd4bc, sunI: 2.15,
     hemiSky: 0xc8d2ec, hemiGnd: 0xe2dad2, hemiI: 0.88, amb: 0x93a2c8, ambI: 0.28,
     fog: 0xd4cad8, fogNear: 300, fogFar: 1650,
     sky: ['#33518f', '#6d7fb8', '#c39fb0', '#f0c9a8', '#f7dcc0'] },
-  { name: 'DAY', shadowTint: 0xaabede, shadowAmt: 0.22, cloud: '#ffffff', disc: 300, discCol: 0xfff6e6,
+  { name: 'DAY', shadowTint: 0xaabede, shadowAmt: 0.22, lamps: 0, cloud: '#ffffff', disc: 300, discCol: 0xfff6e6,
     off: [-190, 250, 140], sun: 0xfff4e2, sunI: 2.45,
     hemiSky: 0xcfe6ff, hemiGnd: 0xffffff, hemiI: 0.78, amb: 0xa8c6e6, ambI: 0.24,
     fog: 0xcfe2f2, fogNear: 320, fogFar: 1750,
     sky: ['#2f74bd', '#78b4e6', '#b9d9f2', '#e8f2fb', '#f4ece0'] },
-  { name: 'GOLDEN', shadowTint: 0x6f79b4, shadowAmt: 0.42, cloud: '#ffd6ae', disc: 560, discCol: 0xffc070,
+  { name: 'GOLDEN', shadowTint: 0x6f79b4, shadowAmt: 0.42, lamps: 0.3, cloud: '#ffd6ae', disc: 560, discCol: 0xffc070,
     off: [-330, 210, 120], sun: 0xffc98c, sunI: 2.9,
     hemiSky: 0xe8d4c4, hemiGnd: 0x93a4d8, hemiI: 0.80, amb: 0x8ea0c8, ambI: 0.20,
     fog: 0xe6c9a2, fogNear: 280, fogFar: 1560,
     sky: ['#2b5c9e', '#6f92c8', '#d8a071', '#ffb877', '#ffd9a8'] },
-  { name: 'DUSK', shadowTint: 0x4e5490, shadowAmt: 0.55, cloud: '#8a76a8', disc: 640, discCol: 0xff8c5a,
+  { name: 'DUSK', shadowTint: 0x4e5490, shadowAmt: 0.55, lamps: 0.85, cloud: '#8a76a8', disc: 640, discCol: 0xff8c5a,
     off: [-340, 150, 70], sun: 0xff9060, sunI: 2.3,
     hemiSky: 0xa898c0, hemiGnd: 0x8a86b0, hemiI: 0.78, amb: 0x6f7cb0, ambI: 0.28,
     fog: 0xa88ab0, fogNear: 240, fogFar: 1380,
@@ -2539,7 +2539,7 @@ function buildCar(color, accent, style = 'gt') {
   // call each for paint, glass, dark, trim, chrome, lamps and brake lamps
   const chrome = new THREE.MeshStandardMaterial({ color: 0xb8bec8, roughness: 0.25, metalness: 1, envMap: carEnv });
   ENV_MATS.add(chrome);
-  const head = new THREE.MeshBasicMaterial({ color: 0xfff4d0 });
+  const head = new THREE.MeshBasicMaterial({ color: 0xd9dde4 });   // the lens: lit to cream when the lamps are on
   const brakeMat = new THREE.MeshBasicMaterial({ color: 0x330008 });
   const parts = new Map();
   const add = (geo, mat, x, y, z, sx, sy, sz, rx, ry, rz) => {
@@ -2629,8 +2629,28 @@ function buildCar(color, accent, style = 'gt') {
   );
   blob.rotation.x = -Math.PI / 2;
 
-  return { group: g, wheels, brakeMat, flames: [flame, flame2], blob, trim };
+  // the headlamps' pool on the road: a warm elongated glow laid 9 m ahead of
+  // the bumper, additive so it brightens whatever it falls on
+  const pool = new THREE.Mesh(new THREE.PlaneGeometry(7, 18), new THREE.MeshBasicMaterial({
+    map: poolTex, color: 0xffe2b0, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false
+  }));
+  pool.visible = false;
+  return { group: g, wheels, brakeMat, headMat: head, flames: [flame, flame2], blob, pool, trim };
 }
+/* the pool's sheet: bright at the near end, fading to nothing 18 m out,
+   soft at the sides */
+const poolTex = (() => {
+  const c = document.createElement('canvas'); c.width = 128; c.height = 256;
+  const g = c.getContext('2d'), r = g.createRadialGradient(64, 236, 0, 64, 236, 236);
+  r.addColorStop(0, 'rgba(255,255,255,0.9)'); r.addColorStop(0.25, 'rgba(255,255,255,0.45)');
+  r.addColorStop(0.6, 'rgba(255,255,255,0.12)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = r; g.fillRect(0, 0, 128, 256);
+  const side = g.createLinearGradient(0, 0, 128, 0);                 // feather the sides
+  side.addColorStop(0, 'rgba(0,0,0,1)'); side.addColorStop(0.3, 'rgba(0,0,0,0)'); side.addColorStop(0.7, 'rgba(0,0,0,0)'); side.addColorStop(1, 'rgba(0,0,0,1)');
+  g.globalCompositeOperation = 'destination-out'; g.fillStyle = side; g.fillRect(0, 0, 128, 256);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+const HEADLAMP_LIT = 0xfff6dc, HEADLAMP_OFF = 0xd9dde4;
 
 /* -------------------- 11. particles (GPU points) ----------------------- */
 const PART_MAX = 900;
@@ -3087,7 +3107,7 @@ class Car {
     const built = buildCar(cfg.color, cfg.accent, cfg.style);
     this.view = built.group;
     this.parts = built;
-    scene.add(this.view, built.blob);
+    scene.add(this.view, built.blob, built.pool);
 
     this.pos = new THREE.Vector3();
     this.vx = 0; this.vz = 0;
@@ -3112,14 +3132,15 @@ class Car {
   /* swap the bodywork for another style and livery, keeping the pose. The
      merged geometries are this car's own and are freed; the lofts are shared. */
   setLook(style, color, accent) {
-    scene.remove(this.view, this.parts.blob);
+    scene.remove(this.view, this.parts.blob, this.parts.pool);
     this.view.traverse(o => { if (o.isMesh) { o.geometry.dispose(); for (const m of [].concat(o.material)) { ENV_MATS.delete(m); m.dispose(); } } });
     this.parts.blob.geometry.dispose(); this.parts.blob.material.dispose();
+    this.parts.pool.geometry.dispose(); this.parts.pool.material.dispose();
     this.style = style; this.color = color; this.accent = accent;
     this.cls = CLASSES[style] || CLASSES.gt;
     const built = buildCar(color, accent, style);
     this.view = built.group; this.parts = built;
-    scene.add(this.view, built.blob);
+    scene.add(this.view, built.blob, built.pool);
     this.updateVisual(0.016, Game.now);
     if (typeof standRows !== 'undefined') standRows[cars.indexOf(this)].children[1].style.color = '#' + color.toString(16).padStart(6, '0');
   }
@@ -3592,6 +3613,18 @@ class Car {
     const fo = this.boosting ? 0.55 + Math.random() * 0.4 : 0;
     for (const f of this.parts.flames) { f.material.opacity = fo; f.scale.z = 0.8 + Math.random() * 0.7; }
     // contact shadow
+    // headlamps: on as the hour gets low, and in a bore; the lens lights and
+    // the pool lies on the road ahead, following the body's tilt
+    const lamps = Math.max(TOD.lamps || 0, FEAT[h] === F_TUNNEL ? 0.85 : 0);
+    const pool = this.parts.pool;
+    pool.visible = lamps > 0.02;
+    if (pool.visible) {
+      pool.material.opacity = lamps * 0.8;
+      this.parts.headMat.color.setHex(HEADLAMP_LIT);
+      _v.set(0, 0.14, STYLES[this.style || 'gt'].lights[2] + 9).applyQuaternion(this.view.quaternion);
+      pool.position.set(px + _v.x, this.groundY + _v.y, pz + _v.z);
+      pool.quaternion.copy(this.view.quaternion); pool.rotateX(-Math.PI / 2);
+    } else this.parts.headMat.color.setHex(HEADLAMP_OFF);
     this.parts.blob.position.set(px, this.groundY + 0.06, pz);
     this.parts.blob.quaternion.copy(_q1);                   // lie on the road, not on the horizontal
     this.parts.blob.rotateX(-Math.PI / 2);
