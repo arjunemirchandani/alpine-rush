@@ -4091,7 +4091,11 @@ const Replay = {
     if (this.cam === 0) this.director(p, dt);
     else { camMode = this.cam - 1; updateCamera(dt, p); }
     this.seeking = false;
-    mixAudio(p);
+    // the mix follows the car only while it moves: paused, or at the end of
+    // the tape, the engine and the tyres fade out instead of holding their
+    // last note (raceOut is the same fade the flag uses)
+    if (this.playing) { mixAudio(p); this.quiet = false; }
+    else if (!this.quiet) { Sfx.raceOut(); this.quiet = true; }
   }
 };
 
