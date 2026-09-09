@@ -1226,6 +1226,7 @@ function blitMirror() {
 /* the whole picture: shadows once, the mirror pass, the main pass, the blit */
 function renderFrame() {
   renderer.shadowMap.needsUpdate = true;
+  placeSun();
   const live = mirrorLive();
   if (live) renderMirror();
   renderer.render(scene, camera);
@@ -1238,22 +1239,22 @@ function renderFrame() {
    peaks and throws the long shadows that sell golden hour. Fog is always
    pulled toward the sky's horizon colour or the two visibly disagree. */
 const TIMES = [
-  { name: 'DAWN', shadowTint: 0x7b85bc, shadowAmt: 0.44,
+  { name: 'DAWN', shadowTint: 0x7b85bc, shadowAmt: 0.44, cloud: '#f4dad2', disc: 420, discCol: 0xffd0b8,
     off: [-300, 200, 250], sun: 0xffd4bc, sunI: 2.15,
     hemiSky: 0xc8d2ec, hemiGnd: 0xe2dad2, hemiI: 0.88, amb: 0x93a2c8, ambI: 0.28,
     fog: 0xd4cad8, fogNear: 300, fogFar: 1650,
     sky: ['#33518f', '#6d7fb8', '#c39fb0', '#f0c9a8', '#f7dcc0'] },
-  { name: 'DAY', shadowTint: 0xaabede, shadowAmt: 0.22,
+  { name: 'DAY', shadowTint: 0xaabede, shadowAmt: 0.22, cloud: '#ffffff', disc: 300, discCol: 0xfff6e6,
     off: [-190, 250, 140], sun: 0xfff4e2, sunI: 2.45,
     hemiSky: 0xcfe6ff, hemiGnd: 0xffffff, hemiI: 0.78, amb: 0xa8c6e6, ambI: 0.24,
     fog: 0xcfe2f2, fogNear: 320, fogFar: 1750,
     sky: ['#2f74bd', '#78b4e6', '#b9d9f2', '#e8f2fb', '#f4ece0'] },
-  { name: 'GOLDEN', shadowTint: 0x6f79b4, shadowAmt: 0.42,
+  { name: 'GOLDEN', shadowTint: 0x6f79b4, shadowAmt: 0.42, cloud: '#ffd6ae', disc: 560, discCol: 0xffc070,
     off: [-330, 210, 120], sun: 0xffc98c, sunI: 2.9,
     hemiSky: 0xe8d4c4, hemiGnd: 0x93a4d8, hemiI: 0.80, amb: 0x8ea0c8, ambI: 0.20,
     fog: 0xe6c9a2, fogNear: 280, fogFar: 1560,
     sky: ['#2b5c9e', '#6f92c8', '#d8a071', '#ffb877', '#ffd9a8'] },
-  { name: 'DUSK', shadowTint: 0x4e5490, shadowAmt: 0.55,
+  { name: 'DUSK', shadowTint: 0x4e5490, shadowAmt: 0.55, cloud: '#8a76a8', disc: 640, discCol: 0xff8c5a,
     off: [-340, 150, 70], sun: 0xff9060, sunI: 2.3,
     hemiSky: 0xa898c0, hemiGnd: 0x8a86b0, hemiI: 0.78, amb: 0x6f7cb0, ambI: 0.28,
     fog: 0xa88ab0, fogNear: 240, fogFar: 1380,
@@ -1297,21 +1298,92 @@ function applyTimeOfDay(i) {
   scene.fog.color.setHex(TOD.fog);
   scene.fog.near = TOD.fogNear; scene.fog.far = TOD.fogFar;
 
-  const c = document.createElement('canvas'); c.width = 4; c.height = 256;
-  const ctx = c.getContext('2d');
-  const g = ctx.createLinearGradient(0, 0, 0, 256);
+  paintSky();
+}
+let skyTex = null;
+
+/* ---- the sky. The dome's texture was a 4 px vertical gradient; it is now
+   a 1024x256 sheet: the hour's gradient down each column, with a cloud
+   layer composited over its upper half. The cloud field is noise on a
+   torus (seamless round the dome), stretched wider toward the horizon the
+   way perspective flattens a real cloud deck, and computed once; each
+   hour or weather change only recomposites it. CLEAR gets wisps above a
+   high threshold, SNOW a heavier deck; BLIZZARD and WHITEOUT keep their
+   flat sky. The dome turns slowly so the clouds drift. ---- */
+const SKY_W = 1024, SKY_H = 256;
+const cloudField = (() => {
+  const f = new Float32Array(SKY_W * SKY_H);
+  for (let y = 0; y < SKY_H; y++) {
+    const v = y / SKY_H;
+    if (v > 0.55) continue;                                     // below the horizon: nothing to see
+    const stretch = 1 + 2 * smooth(0.3, 0.5, v);                // flatter deck toward the horizon
+    for (let x = 0; x < SKY_W; x++) {
+      const u = x / SKY_W * 6.283, cx = Math.cos(u) * 4 / stretch, sx = Math.sin(u) * 4 / stretch;
+      const n = 0.6 * fbm(cx * 1.0 + 3.1, sx * 1.0 + v * 9.0, 4) + 0.4 * fbm(cx * 2.6 - 1.7, sx * 2.6 + v * 22, 3);
+      f[y * SKY_W + x] = 0.5 + n;                                 // roughly 0..1
+    }
+  }
+  return f;
+})();
+const skyCanvas = document.createElement('canvas'); skyCanvas.width = SKY_W; skyCanvas.height = SKY_H;
+function paintSky() {
+  const ctx = skyCanvas.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, SKY_H);
   const stops = [0, 0.34, 0.62, 0.80, 1];
   TOD.sky.forEach((col, k) => g.addColorStop(stops[k], col));
-  ctx.fillStyle = g; ctx.fillRect(0, 0, 4, 256);
-  const tex = new THREE.CanvasTexture(c);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, SKY_W, SKY_H);
+  const cover = WX.cloud || 0;                                  // 0 none .. 1 overcast
+  if (cover > 0) {
+    const img = ctx.getImageData(0, 0, SKY_W, SKY_H), d = img.data;
+    const cc = new THREE.Color(TOD.cloud), cr = cc.r * 255, cg = cc.g * 255, cb = cc.b * 255;
+    // the field's median is 0.50, its 95th percentile 0.79: CLEAR shows what
+    // is above the 80th as wisps, SNOW everything above the 35th as a deck
+    const th = lerp(0.68, 0.38, cover), soft = lerp(0.20, 0.14, cover);
+    for (let y = 0; y < SKY_H * 0.55; y++) {
+      const v = y / SKY_H, band = smooth(0.06, 0.20, v) * (1 - smooth(0.44, 0.53, v));   // none at the zenith, thinning into the haze
+      if (band <= 0) continue;
+      for (let x = 0; x < SKY_W; x++) {
+        const a = smooth(th, th + soft, cloudField[y * SKY_W + x]) * band * lerp(0.7, 0.95, cover);
+        if (a <= 0) continue;
+        const i = (y * SKY_W + x) * 4;
+        d[i] = lerp(d[i], cr, a); d[i + 1] = lerp(d[i + 1], cg, a); d[i + 2] = lerp(d[i + 2], cb, a);
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  const tex = new THREE.CanvasTexture(skyCanvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   if (skyTex) skyTex.dispose();                                // canvas textures leak otherwise
   skyTex = tex;
-  skyDome.material.map = tex;
+  skyDome.material.map = WX.flatSky ? null : tex;               // a whiteout has no sky, only fog
   skyDome.material.needsUpdate = true;
   bakeCarEnv();
 }
-let skyTex = null;
+
+/* ---- the sun: a disc with a long glow, a sprite kept 2800 m from the
+   camera in the hour's sun direction so it sits on the dome, behind the
+   peaks that hide it. Bigger and warmer as the hour gets low; dimmed in
+   snow, gone in a blizzard. ---- */
+const sunTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const g = c.getContext('2d'), r = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.16, 'rgba(255,255,255,1)');
+  r.addColorStop(0.22, 'rgba(255,255,255,0.55)'); r.addColorStop(0.45, 'rgba(255,255,255,0.18)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = r; g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
+})();
+const sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: sunTex, transparent: true, depthWrite: false, fog: false, opacity: 0   // a solid disc: additive light vanished on a bright sky
+}));
+sunSprite.renderOrder = -1;                                      // right after the dome, before anything solid
+scene.add(sunSprite);
+function placeSun() {
+  const T = TOD, n = Math.hypot(T.off[0], T.off[1], T.off[2]), k = 2800 / n;
+  sunSprite.position.set(camera.position.x + T.off[0] * k, camera.position.y + T.off[1] * k, camera.position.z + T.off[2] * k);
+  sunSprite.scale.set(T.disc, T.disc, 1);
+  sunSprite.material.color.setHex(T.discCol);
+  sunSprite.material.opacity = WX.flatSky || WX.fogK < 0.5 ? 0 : (WX.cloud > 0.5 ? 0.35 : 1);
+}
 
 /* ---- what the paint reflects: the sky dome, prefiltered once per hour or
    weather change into a small PMREM and handed to every car material that
@@ -1336,9 +1408,9 @@ function bakeCarEnv() {
    howl is the wind loop's floor gain, flakes also sets the slush spray, and
    box is the side of the cloud around the camera: smaller packs it denser. ---- */
 const WEATHER = [
-  { name: 'CLEAR',    p: 0.36, fogK: 1.00, sunK: 1.00, hemiK: 1.00, skyTint: 0xffffff, road: 0xffffff,
+  { name: 'CLEAR',    p: 0.36, fogK: 1.00, sunK: 1.00, hemiK: 1.00, skyTint: 0xffffff, road: 0xffffff, cloud: 0.25,
     flakes: 0,    flake: 0.42, flakeColor: 0xffffff, flakeAlpha: 0.62, box: 260, fall: 1.0, wind: 0,  grip: 1.00, gust: 0,   howl: 0 },
-  { name: 'SNOW',     p: 0.34, fogK: 0.80, sunK: 0.86, hemiK: 1.05, skyTint: 0xf2f4f6, road: 0xf4f5f7,
+  { name: 'SNOW',     p: 0.34, fogK: 0.80, sunK: 0.86, hemiK: 1.05, skyTint: 0xf2f4f6, road: 0xf4f5f7, cloud: 0.8,
     flakes: 700,  flake: 0.60, flakeColor: 0xe6edf6, flakeAlpha: 0.78, box: 260, fall: 1.0, wind: 3,  grip: 0.94, gust: 0,   howl: 0.015 },
   { name: 'BLIZZARD', p: 0.15, fogK: 0.28, sunK: 0.45, hemiK: 1.25, skyTint: 0xd6dbe2, road: 0xc9cdd4,
     flakes: 3500, flake: 0.95, flakeColor: 0xaeb9c9, flakeAlpha: 0.95, box: 130, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2, howl: 0.085 },   // 2.3x the flakes per cubic metre it had: a wall, not a flurry
@@ -1359,9 +1431,7 @@ function applyWeather(i) {
   else { scene.fog.near = WX.fogNear; scene.fog.far = WX.fogFar; }
   scene.fog.color.setHex(TOD.fog).lerp(new THREE.Color(0xe9ecf0), 1 - WX.fogK * 0.85);
   skyDome.material.color.setHex(WX.skyTint);
-  const map = WX.flatSky ? null : skyTex;                      // a whiteout has no sky, only fog
-  if (skyDome.material.map !== map) { skyDome.material.map = map; skyDome.material.needsUpdate = true; }
-  bakeCarEnv();
+  paintSky();                                                  // the cloud deck and the whiteout's flat sky live in the sheet
   snowGeo.setDrawRange(0, WX.flakes);
   // against the near-white sky a blizzard brings, pure white flakes vanish;
   // real snow reads as grey specks on an overcast sky, so the heavier the
@@ -4942,6 +5012,7 @@ function frame() {
   Perf.tick();
   const dt = Math.min(0.05, clock.getDelta());
   Game.now += dt;
+  skyDome.rotation.y += dt * 0.0025;                             // the cloud deck drifts: a full turn in 42 minutes
 
   if (Game.state === 'count') Game.tickCount(dt);
   const live = Game.state === 'race' || Game.state === 'count' || Game.state === 'done';
@@ -5326,7 +5397,7 @@ requestAnimationFrame(() => {
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
                   driveTest, DRIVE, Records, Ghost, LapTrace, Tape, Replay, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
-                  TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome,
+                  TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome, sunSprite, paintSky, skyCanvas, cloudField, SKY_W, SKY_H,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; }, get TV() { return TV; },
                   get FEATURES() { return FEATURES; }, FEAT, FEAT_K, STRUCT, placeFeatures, terrainAt, TUNNEL_CAP, BRIDGE_GORGE, TUBE, DECK, GALLERY, GALLERY_HILL, FEAT_OPEN, coverHeight };
 </script>
