@@ -1840,9 +1840,21 @@ const rockGeo = (() => {
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   return g;
 })();
+/* a fir: three tiers of cone on one unit-height trunk line, merged once
+   (lazily: mergeParts' scratch vectors are declared further down) */
+let firGeo = null;
+function getFirGeo() {
+  if (firGeo) return firGeo;
+  const cone = new THREE.ConeGeometry(1, 1, 7);
+  return firGeo = mergeParts([
+    { geo: cone, pos: [0, 0.22, 0], scale: [1.00, 0.44, 1.00] },
+    { geo: cone, pos: [0, 0.52, 0], scale: [0.78, 0.40, 0.78] },
+    { geo: cone, pos: [0, 0.80, 0], scale: [0.52, 0.40, 0.52] }
+  ]);
+}
 function buildScenery() {
   const M = new THREE.Matrix4(), P = new THREE.Vector3(), Qt = new THREE.Quaternion(), S = new THREE.Vector3();
-  const trunks = [], foliage = [], caps = [], rocks = [], poles = [];
+  const trunks = [], foliage = [], firs = [], caps = [], rocks = [], poles = [];
 
   // pine forest + boulders, seeded from a jittered grid
   const STEP = 18;
@@ -1861,10 +1873,16 @@ function buildScenery() {
       const dens = fbm((x + TRACK.noise[0]) * 0.0031 + 1.7, (z + TRACK.noise[1]) * 0.0031 - 2.9, 3);
       const treeChance = clamp(0.74 + dens * 0.9 - smooth(120, 250, y) - smooth(0.6, 1.5, slope), 0, 1);
       if (r2 < treeChance) {
-        const h = 8 + r * 13, w = 2.0 + r * 1.9;
+        const h = 8 + r * 13, w = 2.0 + r * 1.9, r3 = hash2(gx * 7 + 3, gz * 11 - 5);
+        // two kinds: a single-cone pine, or a fir of three tiers; each turned
+        // its own way and tinted its own green; snow on top grows with
+        // altitude and comes to every tree when it is snowing
+        const kind = r3 < 0.45 ? firs : foliage;
         trunks.push([x, y, z, w * 0.17, h * 0.3]);
-        foliage.push([x, y + h * 0.28, z, w, h * 0.78]);
-        if (y > 60 || r > 0.6) caps.push([x, y + h * 0.72, z, w * 0.54, h * 0.34]);
+        kind.push([x, y + h * 0.28, z, w, h * 0.78, r3 * 6.283, 0.82 + r * 0.3, 0.88 + r3 * 0.22]);
+        const capK = 0.55 + 0.45 * smooth(30, 160, y) + (WX.flakes ? 0.25 : 0);
+        // the cap hangs from the apex: a shorter cap keeps the tree's point, or the green pokes through as a collar
+        if (y > 40 || r > 0.4 || WX.flakes) caps.push([x, y + h * 1.06 - h * 0.34 * capK, z, w * 0.54 * capK, h * 0.34 * capK, r3 * 6.283]);
       } else if (r < 0.30 && (slope > 0.5 || y > 150 || r2 > 0.8)) {
         rocks.push([x, y - 0.8, z, 1.6 + r * 7, r2 * 6.28]);
       }
@@ -1879,10 +1897,12 @@ function buildScenery() {
     }
   }
 
-  function inst(geo, mat, list, place) {
+  const tintC = new THREE.Color();
+  function inst(geo, mat, list, place, tint) {
     const m = new THREE.InstancedMesh(geo, mat, list.length);
-    list.forEach((d, i) => { place(d); M.compose(P, Qt, S); m.setMatrixAt(i, M); });
+    list.forEach((d, i) => { place(d); M.compose(P, Qt, S); m.setMatrixAt(i, M); if (tint) m.setColorAt(i, tint(d)); });
     m.instanceMatrix.needsUpdate = true;
+    if (tint && m.instanceColor) m.instanceColor.needsUpdate = true;
     m.castShadow = true; m.receiveShadow = false;
     m.frustumCulled = true;
     world.add(m);
@@ -1891,10 +1911,15 @@ function buildScenery() {
   Qt.identity();
   inst(new THREE.CylinderGeometry(0.6, 0.9, 1, 5), new THREE.MeshLambertMaterial({ color: 0x40342a }),
     trunks, d => { P.set(d[0], d[1] + d[4] / 2, d[2]); S.set(d[3], d[4], d[3]); });
-  inst(new THREE.ConeGeometry(1, 1, 7), new THREE.MeshLambertMaterial({ color: 0x1e4230 }),
-    foliage, d => { P.set(d[0], d[1] + d[4] / 2, d[2]); S.set(d[3], d[4], d[3]); });
+  const greenMat = new THREE.MeshLambertMaterial({ color: 0x1e4230 });
+  const tint = d => tintC.setRGB(d[6] * 0.95, d[6] * d[7] * 0.98, d[7] * 0.9);   // yellower or bluer green, per tree
+  inst(new THREE.ConeGeometry(1, 1, 7), greenMat,
+    foliage, d => { Qt.setFromAxisAngle(UP, d[5]); P.set(d[0], d[1] + d[4] / 2, d[2]); S.set(d[3], d[4], d[3]); }, tint);
+  inst(getFirGeo(), greenMat,
+    firs, d => { Qt.setFromAxisAngle(UP, d[5]); P.set(d[0], d[1], d[2]); S.set(d[3] * 1.1, d[4], d[3] * 1.1); }, tint);
   inst(new THREE.ConeGeometry(1, 1, 7), new THREE.MeshLambertMaterial({ color: 0xf0f6ff }),
-    caps, d => { P.set(d[0], d[1] + d[4] / 2, d[2]); S.set(d[3], d[4], d[3]); });
+    caps, d => { Qt.setFromAxisAngle(UP, d[5]); P.set(d[0], d[1] + d[4] / 2, d[2]); S.set(d[3], d[4], d[3]); });
+  Qt.identity();
   inst(rockGeo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
     rocks, d => { Qt.setFromAxisAngle(UP, d[4]); P.set(d[0], d[1], d[2]); S.set(d[3], d[3] * 0.72, d[3] * 0.88); });
   Qt.identity();
