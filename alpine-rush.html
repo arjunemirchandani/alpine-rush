@@ -1826,6 +1826,20 @@ function buildStartLine() {
 }
 
 /* ---------------------------- 9. scenery ------------------------------- */
+/* one boulder for every instance: its upward faces carry snow in the
+   vertex colours, so every rock on the mountain wears a cap - the
+   instances only ever turn about the vertical, so up stays up */
+const rockGeo = (() => {
+  const g = new THREE.IcosahedronGeometry(1, 0), pos = g.attributes.position, col = new Float32Array(pos.count * 3);
+  const rock = new THREE.Color(0x565962), snow = new THREE.Color(0xeef3f8), c = new THREE.Color();
+  for (let f = 0; f < pos.count; f += 3) {
+    const ny = (pos.getY(f) + pos.getY(f + 1) + pos.getY(f + 2)) / 3;   // the face's outward direction, roughly
+    c.copy(rock).lerp(snow, smooth(0.1, 0.55, ny));
+    for (let k = 0; k < 3; k++) { col[(f + k) * 3] = c.r; col[(f + k) * 3 + 1] = c.g; col[(f + k) * 3 + 2] = c.b; }
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return g;
+})();
 function buildScenery() {
   const M = new THREE.Matrix4(), P = new THREE.Vector3(), Qt = new THREE.Quaternion(), S = new THREE.Vector3();
   const trunks = [], foliage = [], caps = [], rocks = [], poles = [];
@@ -1881,7 +1895,7 @@ function buildScenery() {
     foliage, d => { P.set(d[0], d[1] + d[4] / 2, d[2]); S.set(d[3], d[4], d[3]); });
   inst(new THREE.ConeGeometry(1, 1, 7), new THREE.MeshLambertMaterial({ color: 0xf0f6ff }),
     caps, d => { P.set(d[0], d[1] + d[4] / 2, d[2]); S.set(d[3], d[4], d[3]); });
-  inst(new THREE.IcosahedronGeometry(1, 0), new THREE.MeshLambertMaterial({ color: 0x565962, flatShading: true }),
+  inst(rockGeo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
     rocks, d => { Qt.setFromAxisAngle(UP, d[4]); P.set(d[0], d[1], d[2]); S.set(d[3], d[3] * 0.72, d[3] * 0.88); });
   Qt.identity();
   inst(new THREE.CylinderGeometry(0.13, 0.13, 1, 5), new THREE.MeshLambertMaterial({ color: 0xff6a1f }),
