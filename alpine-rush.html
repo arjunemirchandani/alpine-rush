@@ -1470,8 +1470,8 @@ const asphaltTex = canvasTex(256, 256, (g, w, h) => {
     for (let y = 0; y < h; y++) {
       const cx = (c + Math.sin(y / h * 6.283) * 0.012) * w, half = 0.055 * w;
       const band = g.createLinearGradient(cx - half, 0, cx + half, 0);
-      band.addColorStop(0, 'rgba(0,0,0,0)'); band.addColorStop(0.3, 'rgba(0,0,0,0.24)');
-      band.addColorStop(0.7, 'rgba(0,0,0,0.24)'); band.addColorStop(1, 'rgba(0,0,0,0)');
+      band.addColorStop(0, 'rgba(0,0,0,0)'); band.addColorStop(0.3, 'rgba(0,0,0,0.17)');
+      band.addColorStop(0.7, 'rgba(0,0,0,0.17)'); band.addColorStop(1, 'rgba(0,0,0,0)');
       g.fillStyle = band; g.fillRect(cx - half, y, half * 2, 1);
     }
   }
@@ -1481,7 +1481,7 @@ const asphaltTex = canvasTex(256, 256, (g, w, h) => {
     g.fillStyle = sh; g.fillRect(Math.min(x0, x1), 0, Math.abs(x1 - x0), h);
   }
   for (let i = 0; i < 7; i++) {                        // transverse cracks, a few per 34 m
-    g.strokeStyle = `rgba(0,0,0,${0.35 + Math.random() * 0.25})`; g.lineWidth = 1 + Math.random() * 1.2;
+    g.strokeStyle = `rgba(0,0,0,${0.28 + Math.random() * 0.2})`; g.lineWidth = 1 + Math.random() * 1.0;
     let x = Math.random() * w * 0.3, y = Math.random() * h;
     g.beginPath(); g.moveTo(x, y);
     while (x < w * (0.5 + Math.random() * 0.5)) { x += 6 + Math.random() * 10; y += (Math.random() - 0.5) * 7; g.lineTo(x, y); }
