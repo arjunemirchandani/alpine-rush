@@ -1339,14 +1339,14 @@ const WEATHER = [
   { name: 'CLEAR',    p: 0.36, fogK: 1.00, sunK: 1.00, hemiK: 1.00, skyTint: 0xffffff, road: 0xffffff,
     flakes: 0,    flake: 0.42, flakeColor: 0xffffff, flakeAlpha: 0.62, box: 260, fall: 1.0, wind: 0,  grip: 1.00, gust: 0,   howl: 0 },
   { name: 'SNOW',     p: 0.34, fogK: 0.80, sunK: 0.86, hemiK: 1.05, skyTint: 0xf2f4f6, road: 0xf4f5f7,
-    flakes: 700,  flake: 0.46, flakeColor: 0xe6edf6, flakeAlpha: 0.78, box: 260, fall: 1.0, wind: 3,  grip: 0.94, gust: 0,   howl: 0.015 },
+    flakes: 700,  flake: 0.60, flakeColor: 0xe6edf6, flakeAlpha: 0.78, box: 260, fall: 1.0, wind: 3,  grip: 0.94, gust: 0,   howl: 0.015 },
   { name: 'BLIZZARD', p: 0.15, fogK: 0.28, sunK: 0.45, hemiK: 1.25, skyTint: 0xd6dbe2, road: 0xc9cdd4,
-    flakes: 2000, flake: 0.75, flakeColor: 0xbcc8d8, flakeAlpha: 0.92, box: 150, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2, howl: 0.085 },
+    flakes: 2000, flake: 0.95, flakeColor: 0xbcc8d8, flakeAlpha: 0.92, box: 150, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2, howl: 0.085 },
   // WHITEOUT erases the horizon: fog in to 140 m, coloured exactly like a sky
   // dome with its gradient dropped (flatSky), so slope and sky are one grey and
   // no silhouette survives; a spindrift of fine flakes blows through the murk
   { name: 'WHITEOUT', p: 0.15, fogK: 0,    sunK: 0.35, hemiK: 1.30, skyTint: 0xe9ecf0, road: 0xffffff, flatSky: true,
-    fogNear: 10, fogFar: 140, flakes: 500, flake: 0.32, flakeColor: 0xc4cdd8, flakeAlpha: 0.7, box: 120, fall: 0.5, wind: 14, grip: 0.97, gust: 0, howl: 0.012 }
+    fogNear: 10, fogFar: 140, flakes: 500, flake: 0.42, flakeColor: 0xc4cdd8, flakeAlpha: 0.7, box: 120, fall: 0.5, wind: 14, grip: 0.97, gust: 0, howl: 0.012 }
 ];
 let WX = WEATHER[0];
 function applyWeather(i) {
@@ -2567,8 +2567,20 @@ for (let i = 0; i < SNOW_N; i++) {
   sPhase[i] = Math.random() * 6.28;
 }
 snowGeo.setAttribute('position', new THREE.BufferAttribute(sPos, 3));
+/* a flake is a soft disc, not the point sprite's square: a radial falloff
+   with a brighter core, drawn once into a small canvas. The same sprite
+   fixes the mirror, whose 512x160 target made the squares coarser still. */
+const flakeTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const g = c.getContext('2d'), r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.3, 'rgba(255,255,255,0.85)');
+  r.addColorStop(0.7, 'rgba(255,255,255,0.25)'); r.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = r; g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
 const snowFall = new THREE.Points(snowGeo, new THREE.PointsMaterial({
-  color: 0xffffff, size: 0.42, sizeAttenuation: true, transparent: true, opacity: 0.62, depthWrite: false, fog: false
+  map: flakeTex, alphaTest: 0.02, color: 0xffffff, size: 0.42, sizeAttenuation: true, transparent: true, opacity: 0.62, depthWrite: false, fog: false
 }));
 snowFall.frustumCulled = false;
 scene.add(snowFall);
