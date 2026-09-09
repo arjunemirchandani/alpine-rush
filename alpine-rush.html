@@ -1341,7 +1341,7 @@ const WEATHER = [
   { name: 'SNOW',     p: 0.34, fogK: 0.80, sunK: 0.86, hemiK: 1.05, skyTint: 0xf2f4f6, road: 0xf4f5f7,
     flakes: 700,  flake: 0.60, flakeColor: 0xe6edf6, flakeAlpha: 0.78, box: 260, fall: 1.0, wind: 3,  grip: 0.94, gust: 0,   howl: 0.015 },
   { name: 'BLIZZARD', p: 0.15, fogK: 0.28, sunK: 0.45, hemiK: 1.25, skyTint: 0xd6dbe2, road: 0xc9cdd4,
-    flakes: 2000, flake: 0.95, flakeColor: 0xbcc8d8, flakeAlpha: 0.92, box: 150, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2, howl: 0.085 },
+    flakes: 3500, flake: 0.95, flakeColor: 0xaeb9c9, flakeAlpha: 0.95, box: 130, fall: 2.2, wind: 22, grip: 0.80, gust: 3.2, howl: 0.085 },   // 2.3x the flakes per cubic metre it had: a wall, not a flurry
   // WHITEOUT erases the horizon: fog in to 140 m, coloured exactly like a sky
   // dome with its gradient dropped (flatSky), so slope and sky are one grey and
   // no silhouette survives; a spindrift of fine flakes blows through the murk
@@ -2559,7 +2559,7 @@ function updateParticles(dt) {
 }
 
 /* ambient snowfall that follows the camera */
-const SNOW_N = 2000;
+const SNOW_N = 4000;                                   // the buffer; a condition flies WX.flakes of them
 const snowGeo = new THREE.BufferGeometry();
 const sPos = new Float32Array(SNOW_N * 3), sPhase = new Float32Array(SNOW_N);
 for (let i = 0; i < SNOW_N; i++) {
