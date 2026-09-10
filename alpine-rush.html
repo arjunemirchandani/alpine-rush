@@ -1606,6 +1606,7 @@ function clearWorld() {
     }
   });
   world.clear();
+  swayShaders.clear();                                          // the foliage materials go with the world
 }
 
 const SIZE = 2900, SEGS = 280;
@@ -1892,6 +1893,36 @@ const rockGeo = (() => {
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   return g;
 })();
+/* ---- the wind in the trees. A vertex patch on the foliage materials:
+   after the instance matrix, each vertex leans along the world wind by its
+   height above the tree's origin, squared so the base holds and the crown
+   moves, with a per-tree phase from where it stands and a slow gust on
+   top. The amplitude follows the weather's wind (a breath in CLEAR, half
+   a metre at the crown in a blizzard). The cap shares the patch and the
+   origin, so it rides its tree. The shadow pass is left still. ---- */
+const swayShaders = new Set();
+function swaying(mat) {
+  mat.onBeforeCompile = sh => {
+    sh.uniforms.uTime = { value: 0 }; sh.uniforms.uWind = { value: 0 };
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', 'uniform float uTime; uniform float uWind;\n#include <common>')
+      .replace('#include <project_vertex>', `
+        vec4 mvPosition = vec4(transformed, 1.0);
+        #ifdef USE_INSTANCING
+          mvPosition = instanceMatrix * mvPosition;
+          float hs = length(instanceMatrix[1].xyz);
+          float f = clamp((mvPosition.y - instanceMatrix[3].y) / max(hs, 0.01) + 0.5, 0.0, 1.0);
+          float ph = dot(instanceMatrix[3].xz, vec2(0.11, 0.07));
+          float gust = 0.55 + 0.45 * sin(uTime * 0.45 + instanceMatrix[3].x * 0.02);
+          float sway = uWind * f * f * gust * (0.7 + 0.3 * sin(uTime * 1.6 + ph));
+          mvPosition.xz += vec2(0.92, 0.39) * sway;
+        #endif
+        mvPosition = modelViewMatrix * mvPosition;
+        gl_Position = projectionMatrix * mvPosition;`);
+    swayShaders.add(sh.uniforms);
+  };
+  return mat;
+}
 /* a fir: three tiers of cone on one unit-height trunk line, merged once
    (lazily: mergeParts' scratch vectors are declared further down) */
 let firGeo = null;
@@ -1963,13 +1994,13 @@ function buildScenery() {
   Qt.identity();
   inst(new THREE.CylinderGeometry(0.6, 0.9, 1, 5), new THREE.MeshLambertMaterial({ color: 0x40342a }),
     trunks, d => { P.set(d[0], d[1] + d[4] / 2, d[2]); S.set(d[3], d[4], d[3]); });
-  const greenMat = new THREE.MeshLambertMaterial({ color: 0x1e4230 });
+  const greenMat = swaying(new THREE.MeshLambertMaterial({ color: 0x1e4230 }));
   const tint = d => tintC.setRGB(d[6] * 0.95, d[6] * d[7] * 0.98, d[7] * 0.9);   // yellower or bluer green, per tree
   inst(new THREE.ConeGeometry(1, 1, 7), greenMat,
     foliage, d => { Qt.setFromAxisAngle(UP, d[5]); P.set(d[0], d[1] + d[4] / 2, d[2]); S.set(d[3], d[4], d[3]); }, tint);
   inst(getFirGeo(), greenMat,
     firs, d => { Qt.setFromAxisAngle(UP, d[5]); P.set(d[0], d[1], d[2]); S.set(d[3] * 1.1, d[4], d[3] * 1.1); }, tint);
-  inst(new THREE.ConeGeometry(1, 1, 7), new THREE.MeshLambertMaterial({ color: 0xf0f6ff }),
+  inst(new THREE.ConeGeometry(1, 1, 7), swaying(new THREE.MeshLambertMaterial({ color: 0xf0f6ff })),
     caps, d => { Qt.setFromAxisAngle(UP, d[5]); P.set(d[0], d[1] + d[4] / 2, d[2]); S.set(d[3], d[4], d[3]); });
   Qt.identity();
   inst(rockGeo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
@@ -5161,6 +5192,7 @@ function frame() {
   const dt = Math.min(0.05, clock.getDelta());
   Game.now += dt;
   skyDome.rotation.y += dt * 0.0025;                             // the cloud deck drifts: a full turn in 42 minutes
+  for (const u of swayShaders) { u.uTime.value = Game.now; u.uWind.value = 0.04 + 0.5 * WX.wind / 22; }
 
   if (Game.state === 'count') Game.tickCount(dt);
   const live = Game.state === 'race' || Game.state === 'count' || Game.state === 'done';
@@ -5545,7 +5577,7 @@ requestAnimationFrame(() => {
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
                   driveTest, DRIVE, Records, Ghost, LapTrace, Tape, Replay, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
-                  TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome, sunSprite, paintSky, skyCanvas, cloudField, SKY_W, SKY_H,
+                  TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome, sunSprite, paintSky, skyCanvas, cloudField, SKY_W, SKY_H, rangeMeshes, tintRange, swayShaders,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; }, get TV() { return TV; },
                   get FEATURES() { return FEATURES; }, FEAT, FEAT_K, STRUCT, placeFeatures, terrainAt, TUNNEL_CAP, BRIDGE_GORGE, TUBE, DECK, GALLERY, GALLERY_HILL, FEAT_OPEN, coverHeight };
 </script>
