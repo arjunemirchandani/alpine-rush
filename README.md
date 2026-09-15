@@ -328,9 +328,12 @@ under **Featured**, and each is a link:
 | [`GLACIER`](https://arjunemirchandani.github.io/alpine-rush/?cup=GLACIER) | BLIZZARD · BLIZZARD · BLIZZARD · CLEAR at dusk | earn the final |
 | [`BLUEBIRD`](https://arjunemirchandani.github.io/alpine-rush/?cup=BLUEBIRD) | CLEAR · SNOW · BLIZZARD · WHITEOUT | the weather closes in, and the clock runs backwards — dusk, golden, dawn, day |
 | [`BLACKOUT`](https://arjunemirchandani.github.io/alpine-rush/?cup=BLACKOUT) | four blizzards | good luck |
+| [`LEGEND`](https://arjunemirchandani.github.io/alpine-rush/?cup=LEGEND) | CLEAR at dawn · CLEAR at dusk · WHITEOUT at golden hour · CLEAR | run at LEGEND, whatever the picker says |
 
 They were found by dealing every word in a dictionary through the round and weather streams and
-keeping the ones with a shape. The cup panel shows every round's hour and weather before you start,
+keeping the ones with a shape. `LEGEND` is the one cup that owns its difficulty: select it and the
+tier locks to LEGEND, so its title means the same thing to everyone who wins it; pick any other cup
+and the picker gets its own choice back. The cup panel shows every round's hour and weather before you start,
 for any cup you type.
 
 The three rivals keep the personalities they always had — VIPER is **ruthless**, FROST is

@@ -519,6 +519,7 @@
           <button class="dbtn fbtn" data-cup="GLACIER">GLACIER</button>
           <button class="dbtn fbtn" data-cup="BLUEBIRD">BLUEBIRD</button>
           <button class="dbtn fbtn" data-cup="BLACKOUT">BLACKOUT</button>
+          <button class="dbtn fbtn" data-cup="LEGEND">LEGEND</button>
         </div>
         <div id="trackinfo"></div>
         <div id="cupinfo" class="hide"></div>
@@ -4127,8 +4128,12 @@ const FEATURED = {
   ELEGANT:  'FOUR ROUNDS AT GOLDEN HOUR',
   GLACIER:  'THREE BLIZZARDS, THEN ONE CLEAR FINAL AT DUSK',
   BLUEBIRD: 'THE WEATHER CLOSES IN ROUND BY ROUND',
-  BLACKOUT: 'FOUR BLIZZARDS. GOOD LUCK.'
+  BLACKOUT: 'FOUR BLIZZARDS. GOOD LUCK.',
+  LEGEND:   'THREE CLEAR ROUNDS AND A WHITEOUT AT GOLDEN HOUR · RUN AT LEGEND, WHATEVER THE PICKER SAYS'
 };
+/* a cup that owns its tier: the picker locks to it while the cup is typed,
+   so the title it hands out means the same thing to everyone who wins it */
+const CUP_DIFF = { LEGEND: DIFF.length - 1 };
 const TRAITS = { VIPER: 'RUTHLESS', FROST: 'CLEAN', KAIJU: 'WILD' };
 const Cup = {
   get data() { return Records.data.cup || null; },
@@ -5480,21 +5485,23 @@ function previewSeed() {
 /* reload the preview; showTrackInfo() -> showCupInfo() then sets every label
    and lock, so any path that redraws the title (toMenu included) agrees */
 function refreshMode() { applySeed(previewSeed()); }
+let diffBeforeLock = -1;                       // what the picker said before a cup fixed the tier
 function showCupInfo() {
   const cup = mode === 'cup', live = cup && Cup.active && !Cup.done;
   $('seedlbl').textContent = cup ? 'Cup' : 'Circuit';
   seedIn.disabled = live; $('reroll').disabled = live;
-  if (live) {                                    // a running cup owns the seed and the difficulty
-    seedIn.value = Cup.data.seed;
-    diff = Cup.data.diff;
-    document.querySelectorAll('#diff .dbtn').forEach(b => b.classList.toggle('sel', +b.dataset.d === diff));
-  }
-  $('diff').classList.toggle('locked', live);
+  const typed = cleanSeed(seedIn.value), was = diff;
+  const fixed = cup && !live && CUP_DIFF[typed] !== undefined;   // a featured cup that owns its tier
+  if (live) { seedIn.value = Cup.data.seed; diff = Cup.data.diff; }   // a running cup owns the seed and the difficulty
+  else if (fixed) { if (diffBeforeLock < 0) diffBeforeLock = diff; diff = CUP_DIFF[typed]; }
+  else if (diffBeforeLock >= 0) { diff = diffBeforeLock; diffBeforeLock = -1; }   // the picker's own choice, back
+  document.querySelectorAll('#diff .dbtn').forEach(b => b.classList.toggle('sel', +b.dataset.d === diff));
+  if (diff !== was) refreshSummary();
+  $('diff').classList.toggle('locked', live || fixed);
   $('wxrow').classList.toggle('locked', cup);
   $('abandon').classList.toggle('hide', !live);
   $('featured').classList.toggle('hide', !cup);
   $('featured').classList.toggle('locked', live);
-  const typed = cleanSeed(seedIn.value);
   document.querySelectorAll('.fbtn').forEach(b => b.classList.toggle('sel', b.dataset.cup === typed));
   $('go').textContent = !cup ? 'START ENGINE' : live ? `CONTINUE · ROUND ${Cup.data.round + 1}` : 'START CUP';
   const box = $('cupinfo');
