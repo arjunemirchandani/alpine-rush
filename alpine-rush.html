@@ -3917,12 +3917,12 @@ function applyDifficulty() {
 const STORE_KEY = 'alpineRush.v1', GHOST_HZ = 20, MAX_STORED = 25;
 
 const Records = {
-  ok: true, data: { circuits: {}, totals: { races: 0, wins: 0, drift: 0, cups: 0, titles: 0 } },
+  ok: true, data: { circuits: {}, totals: { races: 0, wins: 0, drift: 0, cups: 0, titles: 0, legend: 0 } },
 
   load() {
     // Reset first: assigning over the existing object left stale records in
     // memory after storage was cleared, so a reload did not actually reload.
-    this.data = { circuits: {}, totals: { races: 0, wins: 0, drift: 0, cups: 0, titles: 0 }, prefs: { ghost: true }, cup: null };
+    this.data = { circuits: {}, totals: { races: 0, wins: 0, drift: 0, cups: 0, titles: 0, legend: 0 }, prefs: { ghost: true }, cup: null };
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (!raw) return;
@@ -3960,7 +3960,11 @@ const Records = {
     this.data.totals.races++; if (won) this.data.totals.wins++;
     this.data.totals.drift += drift | 0; this.save();
   },
-  bumpCup(won) { this.data.totals.cups++; if (won) this.data.totals.titles++; this.save(); }
+  bumpCup(won, atLegend) {
+    this.data.totals.cups++;
+    if (won) { this.data.totals.titles++; if (atLegend) this.data.totals.legend = (this.data.totals.legend || 0) + 1; }
+    this.save();
+  }
 };
 Records.load();
 
@@ -4186,7 +4190,7 @@ const Cup = {
      title goes back to offering a new one. The card keeps its own snapshot. */
   close() {
     const won = this.standings()[0].car === player;
-    Records.bumpCup(won);
+    Records.bumpCup(won, this.data.diff === DIFF.length - 1);   // a cup won at LEGEND is a LEGEND title
     this.abandon();
     return won;
   }
@@ -4956,7 +4960,8 @@ const Game = {
       if (this.inCup) {
         const round = Cup.data.round + 1;
         Cup.award(final);
-        this.resultCard.cup = { round, standings: Cup.standings(), done: Cup.done, seed: Cup.data.seed };
+        this.resultCard.cup = { round, standings: Cup.standings(), done: Cup.done, seed: Cup.data.seed,
+                                legend: Cup.data.diff === DIFF.length - 1 };
         if (Cup.done) Cup.close();
       }
       this.resultTimer = setTimeout(() => this.showResults(rank), 1400);
@@ -4988,6 +4993,7 @@ const Game = {
     // is still on the card below
     const cupPos = card.cup && card.cup.done ? card.cup.standings.findIndex(r => r.car === player) : -1;
     $('rtitle').textContent = cupPos < 0 ? (rank === 0 ? 'VICTORY' : rank === 1 ? 'SO CLOSE' : 'FINISH')
+                            : cupPos === 0 && card.cup.legend ? 'LEGEND'         // the word itself, earned
                             : ['CHAMPION', 'RUNNER-UP', 'PODIUM', 'SEASON OVER'][cupPos];
     $('rtitle').classList.toggle('cup', cupPos === 0);
     $('rsub').textContent = cupPos < 0
@@ -5030,7 +5036,7 @@ const Game = {
                                        : `CHAMPIONSHIP · AFTER ROUND ${round} OF ${CUP_ROUNDS}`;
       const champ = standings[0];
       $('rchamp').classList.toggle('hide', !done);
-      $('rchamp').innerHTML = champ.car === player ? '★ YOU TAKE THE CUP ★'
+      $('rchamp').innerHTML = champ.car === player ? (card.cup.legend ? '★ YOU TAKE THE CUP ★ · A LEGEND TITLE' : '★ YOU TAKE THE CUP ★')
         : `★ <b>${champ.car.name}</b>${champ.trait ? ' · ' + champ.trait : ''} TAKES THE CUP`;
       $('rcupgrid').innerHTML = standings.map((r, i) => {
         const gained = CUP_POINTS[final.indexOf(r.car)] || 0;
@@ -5516,7 +5522,11 @@ function showCupInfo() {
     return `<span class="r${i < round ? ' done' : i === round ? ' now' : ''}"><b>${r}</b>` +
            `<i>${TIMES[d.hour].name} · ${WEATHER[d.wx].name}</i></span>`;
   }).join('') + '</span>';
-  let head = `<b>${CUP_ROUNDS} ROUNDS</b> · ${CUP_POINTS.join(' / ')} PTS`;
+  // the career so far: cups won, and how many of those were won at LEGEND
+  const T = Records.data.totals;
+  let head = `<b>${CUP_ROUNDS} ROUNDS</b> · ${CUP_POINTS.join(' / ')} PTS` +
+             (T.cups ? ` · <b>${T.titles}</b> OF ${T.cups} CUPS WON` : '') +
+             (T.legend ? ` · <b>★ ${T.legend}</b> AT LEGEND` : '');
   if (Cup.active && !Cup.done) {
     const st = Cup.standings(), me = st.findIndex(r => r.car === player), lead = st[0];
     head = `<b>CUP ${seed}</b> · ROUND ${round + 1} OF ${CUP_ROUNDS} · YOU ${ORD[me]}${SUF[me]} ON <b>${st[me].points}</b> PTS` +
