@@ -527,6 +527,7 @@
           <b id="pbtime">--:--.---</b>
           <button class="dbtn" id="ghosttoggle">GHOST ON</button>
           <button class="dbtn" id="clearrec">CLEAR</button>
+          <button class="dbtn" id="watchrec" style="display:none">REPLAY</button>
         </div>
       </div>
       <div class="pane" data-pane="cond">
@@ -3937,7 +3938,7 @@ const Records = {
       const keys = Object.keys(this.data.circuits);
       if (keys.length > MAX_STORED) {       // bound the footprint, oldest out first
         keys.sort((a, b) => (this.data.circuits[a].at || 0) - (this.data.circuits[b].at || 0));
-        for (const k of keys.slice(0, keys.length - MAX_STORED)) delete this.data.circuits[k];
+        for (const k of keys.slice(0, keys.length - MAX_STORED)) { delete this.data.circuits[k]; TapeStore.del(k); }
       }
       localStorage.setItem(STORE_KEY, JSON.stringify(this.data));
     } catch (e) { this.ok = false; }        // quota exceeded: carry on without saving
@@ -3952,7 +3953,7 @@ const Records = {
     this.save();
     return true;
   },
-  clear(seed) { delete this.data.circuits[seed]; this.save(); },
+  clear(seed) { delete this.data.circuits[seed]; TapeStore.del(seed); this.save(); },
   setPref(k, v) { this.data.prefs[k] = v; this.save(); },
   bumpRace(won, drift) {
     this.data.totals.races++; if (won) this.data.totals.wins++;
@@ -4008,7 +4009,7 @@ const Ghost = {
   finishLap(lapMs) {
     if (Game.testing || Game.autopilot || weatherOverridden() || this.rec.length < 10) { this.startLap(); return false; }
     const improved = Records.submit(SEED, lapMs, this.pack(this.rec), player.style || 'gt');
-    if (improved) this.loadFor(SEED);
+    if (improved) { this.loadFor(SEED); Tape.keep = true; }        // the race that set it is worth keeping
     this.startLap();
     return improved;
   },
@@ -4192,10 +4193,15 @@ const Cup = {
    brake, handbrake, boost, drift, rpm, speed, on-track). A replay poses the
    cars from this instead of running physics; updateVisual() then gives the
    wheels, lights, flames, spray, smoke and skids for free, and the engine
-   note comes off the recorded rpm. Held in memory for the last race only.
+   note comes off the recorded rpm. Held in memory for the last race; the
+   race that set a circuit's record is also kept on disk (TapeStore), so the
+   title screen can play it back on any later visit.
    Samples are taken in the frame loop, never in fastForward, so the drive
    test and the finish projection leave no trace on it. */
 const TAPE_HZ = 30, TAPE_FIELDS = 11, TAPE_MAX_S = 420;
+/* stored precision per field: centimetres, milliradians, thousandths of a
+   pedal, cm/s - each coarser than anything the visuals can show */
+const TAPE_Q = [100, 100, 1000, 1000, 1000, 1000, 1, 1000, 1000, 100, 1];
 /* Timing is the whole art of a smooth replay. The physics moves in 1/120 s
    steps, so a frame's positions are valid at the physics clock (simT), not
    at the frame's; stamped with the frame clock they were up to half a metre
@@ -4206,16 +4212,19 @@ const TAPE_HZ = 30, TAPE_FIELDS = 11, TAPE_MAX_S = 420;
    frame and never duplicated. */
 const Tape = {
   hz: TAPE_HZ, n: 0, t: 0, t0: 0, on: false, events: [], meta: null, prev: null, prevT: 0,
+  keep: false, done: false,                 // keep: a record was set on this tape; done: the player took the flag
   buf: new Float32Array(4 * TAPE_FIELDS * TAPE_HZ * TAPE_MAX_S),
   get cap() { return TAPE_HZ * TAPE_MAX_S; },
   get seconds() { return this.n / TAPE_HZ; },
   /** called at the green light */
   begin() {
+    this.stop();                                              // the previous tape, if it was worth keeping
     this.n = 0; this.t = 0; this.t0 = simT; this.prev = null; this.events = []; this.on = true;
+    this.keep = false; this.done = false;
     this.meta = { seed: SEED, hour: TOD.name, wx: WX.name, diff: DIFF[diff].name, cup: Game.inCup ? Cup.data.seed : null,
                   laps: LAPS, looks: cars.map(c => ({ style: c.style, color: c.color, accent: c.accent, name: c.name })) };
   },
-  stop() { this.on = false; },
+  stop() { this.on = false; this.persist(); },
   /** the state of every car right now, as one flat row per car */
   snap() {
     return cars.map(c => [c.pos.x, c.pos.z, c.yaw, c.ctl.steer, c.ctl.throttle, c.ctl.brake,
@@ -4243,11 +4252,54 @@ const Tape = {
       this.n++;
     }
     this.prev = cur; this.prevT = t; this.t = t;
-    if (cars.every(c => c.finished)) this.on = false;          // the last flag ends the tape
+    if (cars.every(c => c.finished)) this.stop();              // the last flag ends the tape
   },
   /** a marker on the timeline: lap or finish, by car */
   mark(type, car) {                                          // (a projected lap is not on the tape)
-    if (this.on && !Game.testing && !Game.projecting) this.events.push({ t: simT - this.t0, type, car: cars.indexOf(car) });
+    if (!this.on || Game.testing || Game.projecting) return;
+    this.events.push({ t: simT - this.t0, type, car: cars.indexOf(car) });
+    if (type === 'finish' && car === player) { this.done = true; this.meta.lap = player.best; }
+  },
+  /* the record race goes to disk once - when the tape ends, when a new one
+     begins, or when the page is left - and only if the player finished it */
+  persist() {
+    if (!this.keep) return;
+    this.keep = false;
+    if (!this.done || this.n < TAPE_HZ * 5) return;
+    TapeStore.put(this.meta.seed, this.pack()).then(() => toast('RECORD RACE SAVED', 1500, '#66ffa8')).catch(() => {});
+  },
+  /* the buffer as bytes: each value quantised, then the change from the
+     previous slot as a zigzag varint - most steps fit a byte, so a race is
+     about a quarter of its Float32 size without a compressor */
+  pack() {
+    const C = cars.length, F = TAPE_FIELDS, n = this.n, B = this.buf;
+    const out = new Uint8Array(n * C * F * 5), last = new Int32Array(C * F);
+    let p = 0;
+    for (let s = 0; s < n; s++) for (let i = 0; i < C; i++) for (let f = 0; f < F; f++) {
+      const j = i * F + f, v = Math.round(B[(s * C + i) * F + f] * TAPE_Q[f]);
+      const d = v - last[j]; last[j] = v;
+      let u = ((d << 1) ^ (d >> 31)) >>> 0;
+      while (u >= 0x80) { out[p++] = (u & 0x7f) | 0x80; u >>>= 7; }
+      out[p++] = u;
+    }
+    return { v: 1, seed: this.meta.seed, meta: this.meta, events: this.events, n, cars: C, fields: F, hz: TAPE_HZ,
+             q: TAPE_Q, at: Date.now(), bytes: out.slice(0, p) };
+  },
+  /** a stored record back into the buffer; false if it is not one this build can read */
+  load(rec) {
+    if (!rec || rec.v !== 1 || rec.fields !== TAPE_FIELDS || rec.hz !== TAPE_HZ || rec.cars !== cars.length || !rec.meta) return false;
+    const C = rec.cars, F = TAPE_FIELDS, n = Math.min(rec.n, this.cap), b = rec.bytes, B = this.buf, last = new Int32Array(C * F);
+    let p = 0;
+    for (let s = 0; s < n; s++) for (let i = 0; i < C; i++) for (let f = 0; f < F; f++) {
+      let u = 0, sh = 0, byte;
+      do { byte = b[p++]; u |= (byte & 0x7f) << sh; sh += 7; } while (byte & 0x80);
+      const j = i * F + f;
+      last[j] += (u >>> 1) ^ -(u & 1);
+      B[(s * C + i) * F + f] = last[j] / rec.q[f];
+    }
+    this.n = n; this.t = n / TAPE_HZ; this.events = rec.events || []; this.meta = rec.meta;
+    this.on = false; this.keep = false; this.done = true;
+    return true;
   },
   /** the recorded state of car i at time t, interpolated, into `out` */
   read(i, t, out) {
@@ -4261,6 +4313,45 @@ const Tape = {
     out.drift = lerp(B[ka + 7], B[kb + 7], u); out.rpm = lerp(B[ka + 8], B[kb + 8], u); out.speed = lerp(B[ka + 9], B[kb + 9], u);
     out.laps = B[ka + 10];
     return out;
+  }
+};
+
+/* Where the record races live: IndexedDB, one entry per seed, the bytes
+   stored as they are. localStorage would need them as text and its budget
+   is a few megabytes; a race is ~150 KB packed, and a full set of 25 fits
+   here with room to spare. `seeds` mirrors the keys so the title screen can
+   ask synchronously whether a seed has a tape. */
+const TapeStore = {
+  seeds: new Set(), ok: typeof indexedDB !== 'undefined', db: null,
+  open() {
+    if (this.db) return Promise.resolve(this.db);
+    if (!this.ok) return Promise.reject(new Error('no storage'));
+    return new Promise((res, rej) => {
+      let r;
+      try { r = indexedDB.open('alpineRush', 1); } catch (e) { this.ok = false; return rej(e); }
+      r.onupgradeneeded = () => r.result.createObjectStore('tapes');
+      r.onsuccess = () => res(this.db = r.result);
+      r.onerror = r.onblocked = () => { this.ok = false; rej(r.error); };
+    });
+  },
+  req(mode, fn) {
+    return this.open().then(db => new Promise((res, rej) => {
+      const r = fn(db.transaction('tapes', mode).objectStore('tapes'));
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    }));
+  },
+  get(seed) { return this.req('readonly', st => st.get(seed)); },
+  put(seed, rec) { return this.req('readwrite', st => st.put(rec, seed)).then(() => { this.seeds.add(seed); if (Game.state === 'menu') showTrackInfo(); }); },
+  del(seed) { if (!this.seeds.delete(seed)) return; this.req('readwrite', st => st.delete(seed)).catch(() => {}); },
+  /* at startup: learn what is there, and drop tapes whose record is gone */
+  init() {
+    this.req('readonly', st => st.getAllKeys()).then(keys => {
+      for (const k of keys) {
+        if (Records.ok && !Records.data.circuits[k]) this.req('readwrite', st => st.delete(k)).catch(() => {});
+        else this.seeds.add(k);
+      }
+      if (Game.state === 'menu') showTrackInfo();
+    }).catch(() => {});
   }
 };
 
@@ -4294,9 +4385,48 @@ const Replay = {
     $('replay').classList.add('hide');
     Sfx.silence();
     cars.forEach(c => { c.view.visible = true; });
+    if (this.from === 'menu') {                                // a saved race: back to the title as it was
+      const m = this.menu; this.menu = null;
+      timeChoice = m.time; wxChoice = m.wx;
+      if (m.redress) applySeed(SEED);
+      m.looks.forEach((L, i) => {
+        const c = cars[i];
+        if (c.style !== L.style || c.color !== L.color || c.accent !== L.accent) c.setLook(L.style, L.color, L.accent);
+      });
+      Game.toMenu();
+      return;
+    }
     Game.state = 'done';
     if (Game.resultCard) Game.showResults(Game.resultCard.rank);
     Sfx.startMusic();
+  },
+  /* the seed's saved record race, from the title screen: the tape's own hour
+     and weather (the title may be previewing others) and the cars as they
+     were, put back when it closes */
+  loading: false, menu: null,
+  openSaved() {
+    if (Game.state !== 'menu' || this.loading) return;
+    this.loading = true;
+    TapeStore.get(SEED).then(rec => {
+      this.loading = false;
+      if (Game.state !== 'menu') return;
+      if (!rec || rec.seed !== SEED || !Tape.load(rec)) { toast('NO SAVED REPLAY', 900); TapeStore.del(SEED); return; }
+      Sfx.init();
+      const m = this.menu = { time: timeChoice, wx: wxChoice, redress: false,
+                              looks: cars.map(c => ({ style: c.style, color: c.color, accent: c.accent })) };
+      const ti = TIMES.findIndex(t => t.name === rec.meta.hour), wi = WEATHER.findIndex(w => w.name === rec.meta.wx);
+      if ((ti >= 0 && TIMES[ti] !== TOD) || (wi >= 0 && WEATHER[wi] !== WX)) {
+        timeChoice = ti; wxChoice = wi; m.redress = true;
+        applySeed(SEED);                                        // relit and re-dressed; the geometry is the same
+      }
+      (rec.meta.looks || []).forEach((L, i) => {
+        const c = cars[i];
+        if (c && (c.style !== L.style || c.color !== L.color || c.accent !== L.accent)) c.setLook(L.style, L.color, L.accent);
+      });
+      $('title').classList.add('hide');
+      this.open();
+      toast(`RECORD RACE · ${rec.meta.lap ? fmt(rec.meta.lap) : SEED} · ${rec.meta.diff || ''}`, 1800, '#66ffa8');
+    }).catch(() => { this.loading = false; toast('NO SAVED REPLAY', 900); });
   },
   toggle() { this.playing = !this.playing; if (this.playing && this.t >= this.length - 0.05) this.seek(0); this.refresh(); },
   seek(t) { this.t = clamp(t, 0, this.length); this.seeking = true; this.refresh(); },
@@ -4726,6 +4856,7 @@ const Game = {
 
   begin() {
     Sfx.init(); Sfx.resume();
+    Tape.stop();                                // a record race still on the tape goes to disk first
     applyDifficulty();
     cars.forEach((c, i) => c.placeOnGrid(i));   // slot 0 = back of the grid = player
     driftScore = driftRun = bankedScore = 0; driftMult = 1;
@@ -5292,6 +5423,7 @@ function showTrackInfo() {
 
   const cb = $('clearrec');
   cb.style.display = pb ? '' : 'none';        // nothing to clear, nothing to show
+  $('watchrec').style.display = TapeStore.seeds.has(SEED) ? '' : 'none';
   cb.textContent = 'CLEAR'; cb.classList.remove('arm');
   clearArmedAt = 0;
   const shape = t.minCornerRadius < 60 ? 'TECHNICAL' : t.minCornerRadius < 95 ? 'BALANCED' : 'FAST';
@@ -5541,6 +5673,8 @@ $('go').addEventListener('click', () => {
 });
 $('again').addEventListener('click', () => Game.advance());
 $('watch').addEventListener('click', () => Replay.open());
+$('watchrec').addEventListener('click', () => Replay.openSaved());
+window.addEventListener('pagehide', () => Tape.stop());       // a record race on the tape is not lost to a reload
 $('rpplay').addEventListener('click', () => Replay.toggle());
 $('rptrack').addEventListener('click', e => {
   const r = e.currentTarget.getBoundingClientRect();
@@ -5560,6 +5694,7 @@ simReady = true;
   else setMode(Records.data.prefs.mode === 'cup' ? 'cup' : 'race');
   applyLook(false);                                  // the remembered car, on the grid
   mirrorOn = Records.data.prefs.mirror !== false;
+  TapeStore.init();
 }
 renderer.render(scene, camera);
 
@@ -5576,7 +5711,7 @@ requestAnimationFrame(() => {
 //   __rush.Perf.bench()            -> 40 forced frames, ms each: compare before and after a change
 window.__rush = { player, rivals, cars, Game, scene, camera, atDist, heightAt, Sfx, renderer,
                   applySeed, loadTrack, measureTrack, generateTrack, isDrivable, LIMITS, TOW,
-                  driveTest, DRIVE, Records, Ghost, LapTrace, Tape, Replay, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
+                  driveTest, DRIVE, Records, Ghost, LapTrace, Tape, TapeStore, Replay, Cup, Perf, buildCar, CLASSES, DIFF, TECH, REH,
                   TIMES, applyTimeOfDay, WEATHER, applyWeather, get WX() { return WX; }, weatherOverridden, sun, hemi, ambient, skyDome, sunSprite, paintSky, skyCanvas, cloudField, SKY_W, SKY_H, rangeMeshes, tintRange, swayShaders,
                   get TOTAL() { return TOTAL; }, get trackInfo() { return trackInfo; }, get TV() { return TV; },
                   get FEATURES() { return FEATURES; }, FEAT, FEAT_K, STRUCT, placeFeatures, terrainAt, TUNNEL_CAP, BRIDGE_GORGE, TUBE, DECK, GALLERY, GALLERY_HILL, FEAT_OPEN, coverHeight };

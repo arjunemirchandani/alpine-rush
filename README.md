@@ -245,7 +245,15 @@ camera). It follows the nearest camera ahead of your car and cuts when you're 45
 keeps the car the same size on screen, so it goes long on the straights. **C** cycles TV → chase →
 hood → cinema; **N** follows the next car. **Space** pauses, **←/→** seek 5 s, **1–4** set the speed
 from ¼× to 2×, click the timeline to scrub (the ticks are laps and finishes in each car's colour),
-**Esc** returns to the results card. The tape is kept in memory for the last race only.
+**Esc** returns to the results card.
+
+The race that set your record on a circuit is kept. When a lap beats your best and you go on to take
+the flag, the tape is written to IndexedDB under the seed (about 150–230 KB packed: every value
+quantised to a centimetre or a milliradian, then stored as the change from the previous frame, most
+of which fit a byte). Back on the title screen, a **REPLAY** button appears beside the record and
+plays that race in the hour, weather and cars it was run in, whatever the title is previewing; **Esc**
+puts the title back as it was. Clearing the record clears its tape, and a record that ages out of
+the store takes its tape with it.
 
 ## Records and the ghost
 
