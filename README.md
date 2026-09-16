@@ -315,8 +315,9 @@ A few deliberate rules:
 - **Difficulty locks at the start** of the cup; time of day follows each round's seed.
 - **A cup survives a reload.** Leave mid-series and the title screen offers CONTINUE · ROUND *n*
   with the standings, or ABANDON CUP (two presses, like CLEAR).
-- **A cup won at LEGEND is a LEGEND title.** The results card headlines the word itself, and the cup
-  panel keeps the career: cups won, and how many of them at LEGEND.
+- **A cup won at LEGEND is a LEGEND title.** The results card headlines the word itself, the cup
+  panel keeps the career (cups won, and how many of them at LEGEND), and the title card wears a
+  small laurel from then on.
 
 ### Cups worth racing
 
