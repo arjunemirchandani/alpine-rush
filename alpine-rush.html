@@ -213,9 +213,10 @@
   /* the laurel: small, amber, under the tagline; only there once it is earned */
   #laurel{ display:flex; justify-content:center; align-items:center; gap:5px; margin-top:10px;
            color:var(--am); font-size:9.5px; letter-spacing:.38em; font-weight:700;
-           text-shadow:0 0 10px rgba(255,204,51,.45); }
+           text-shadow:0 0 10px rgba(255,204,51,.7); }
   #laurel.hide{ display:none; }
-  #laurel svg{ width:22px; height:21px; fill:currentColor; stroke:currentColor; opacity:.85; }
+  #laurel svg{ width:22px; height:21px; fill:currentColor; stroke:currentColor;
+               filter:drop-shadow(0 0 3px rgba(255,204,51,.55)); }
   #laurel span{ padding-left:.38em; }         /* the tracking adds a trailing gap; match it */
   #laurel i{ font-style:normal; font-weight:400; opacity:.7; }
   /* tabs: the title card's rows, one pane at a time */
