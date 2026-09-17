@@ -253,7 +253,8 @@ quantised to a centimetre or a milliradian, then stored as the change from the p
 of which fit a byte). Back on the title screen, a **REPLAY** button appears beside the record and
 plays that race in the hour, weather and cars it was run in, whatever the title is previewing; **Esc**
 puts the title back as it was. Clearing the record clears its tape, and a record that ages out of
-the store takes its tape with it.
+the store takes its tape with it. The CONTROLS tab shows how many are stored and their size; the
+per-seed table is `__rush.TapeStore.report()` in the console.
 
 ## Records and the ghost
 
@@ -642,6 +643,7 @@ __rush.Game.fastForward(105)       // simulate 105s headlessly (~120 ms)
 __rush.Perf.snapshot()             // live fps, frame ms (mean / p95), draw calls, triangles
 __rush.Perf.bench()                // 40 forced frames, ms each: compare before and after a change
 __rush.FEATURES                    // this circuit's tunnels, bridges and galleries: type, range, open side
+__rush.TapeStore.report()          // saved record races: seed, KB, seconds, lap, date
 ```
 
 Autopilot is off by default and takes effect on the next frame — no restart needed.

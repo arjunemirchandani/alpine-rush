@@ -591,6 +591,7 @@
           <div class="k"><kbd>P</kbd> Pause · <kbd>M</kbd> Mute</div>
         </div>
         <div class="rowlbl dim">Drift to fill the boost meter · gamepad supported · Esc pauses</div>
+        <div id="tapes" class="rowlbl dim hide"></div>
       </div>
     </div>
     <!-- what you are about to drive, whichever tab is open -->
@@ -3933,7 +3934,7 @@ const Records = {
   load() {
     // Reset first: assigning over the existing object left stale records in
     // memory after storage was cleared, so a reload did not actually reload.
-    this.data = { circuits: {}, totals: { races: 0, wins: 0, drift: 0, cups: 0, titles: 0, legend: 0 }, prefs: { ghost: true }, cup: null };
+    this.data = { circuits: {}, totals: { races: 0, wins: 0, drift: 0, cups: 0, titles: 0, legend: 0 }, prefs: { ghost: true }, cup: null, tapes: {} };
     try {
       const raw = localStorage.getItem(STORE_KEY);
       if (!raw) return;
@@ -3942,6 +3943,7 @@ const Records = {
       if (parsed.totals) Object.assign(this.data.totals, parsed.totals);
       if (parsed.prefs) Object.assign(this.data.prefs, parsed.prefs);
       if (parsed.cup) this.data.cup = parsed.cup;
+      if (parsed.tapes) this.data.tapes = parsed.tapes;
     } catch (e) { this.ok = false; }        // private mode / storage disabled
   },
   save() {
@@ -4361,18 +4363,46 @@ const TapeStore = {
     }));
   },
   get(seed) { return this.req('readonly', st => st.get(seed)); },
-  put(seed, rec) { return this.req('readwrite', st => st.put(rec, seed)).then(() => { this.seeds.add(seed); if (Game.state === 'menu') showTrackInfo(); }); },
-  del(seed) { if (!this.seeds.delete(seed)) return; this.req('readwrite', st => st.delete(seed)).catch(() => {}); },
-  /* at startup: learn what is there, and drop tapes whose record is gone */
+  put(seed, rec) {
+    return this.req('readwrite', st => st.put(rec, seed)).then(() => {
+      this.seeds.add(seed); this.note(seed, rec);
+      if (Game.state === 'menu') showTrackInfo();
+    });
+  },
+  del(seed) {
+    if (!this.seeds.delete(seed)) return;
+    delete Records.data.tapes[seed]; Records.save();
+    this.req('readwrite', st => st.delete(seed)).catch(() => {});
+  },
+  /* the sidecar in Records: enough about each tape to report on it without
+     reading it - size, length, the lap it holds, when it was set */
+  note(seed, rec) {
+    Records.data.tapes[seed] = { bytes: rec.bytes.length, n: rec.n, lap: rec.meta.lap || 0, at: rec.at };
+    Records.save();
+  },
+  /* at startup: learn what is there, drop tapes whose record is gone, and
+     fill in the sidecar for any tape it does not know (one read each) */
   init() {
     this.req('readonly', st => st.getAllKeys()).then(keys => {
       for (const k of keys) {
-        if (Records.ok && !Records.data.circuits[k]) this.req('readwrite', st => st.delete(k)).catch(() => {});
-        else this.seeds.add(k);
+        if (Records.ok && !Records.data.circuits[k]) { this.req('readwrite', st => st.delete(k)).catch(() => {}); continue; }
+        this.seeds.add(k);
+        if (!Records.data.tapes[k]) this.get(k).then(rec => { if (rec && rec.bytes) { this.note(k, rec); if (Game.state === 'menu') showTrackInfo(); } }).catch(() => {});
       }
+      for (const k of Object.keys(Records.data.tapes)) if (!this.seeds.has(k)) delete Records.data.tapes[k];
       if (Game.state === 'menu') showTrackInfo();
     }).catch(() => {});
-  }
+  },
+  /* housekeeping: what is stored, newest first - `__rush.TapeStore.report()` */
+  report() {
+    const rows = [...this.seeds].map(seed => ({ seed, ...(Records.data.tapes[seed] || {}) }))
+      .sort((a, b) => (b.at || 0) - (a.at || 0))
+      .map(r => ({ seed: r.seed, kb: Math.round((r.bytes || 0) / 1024), seconds: r.n ? Math.round(r.n / TAPE_HZ) : null,
+                   lap: r.lap ? fmt(r.lap) : null, set: r.at ? new Date(r.at).toISOString().slice(0, 10) : null }));
+    if (rows.length) console.table(rows); else console.log('no saved replays');
+    return rows;
+  },
+  get bytes() { let b = 0; for (const k of this.seeds) b += (Records.data.tapes[k] || {}).bytes || 0; return b; }
 };
 
 /* --------------------------- 16d. the replay ---------------------------- */
@@ -5449,6 +5479,11 @@ function showTrackInfo() {
   const cb = $('clearrec');
   cb.style.display = pb ? '' : 'none';        // nothing to clear, nothing to show
   $('watchrec').style.display = TapeStore.seeds.has(SEED) ? '' : 'none';
+  // housekeeping, on the quiet tab: how many record races are stored and their size
+  const nT = TapeStore.seeds.size, seeds = [...TapeStore.seeds].sort((a, b) => ((Records.data.tapes[b] || {}).at || 0) - ((Records.data.tapes[a] || {}).at || 0));
+  $('tapes').classList.toggle('hide', !nT);
+  if (nT) $('tapes').textContent = `${nT} SAVED REPLAY${nT > 1 ? 'S' : ''} · ${(TapeStore.bytes / 1048576).toFixed(1)} MB · ` +
+    seeds.slice(0, 8).join(' · ') + (nT > 8 ? ` · +${nT - 8} MORE` : '') + ' · CLEAR A RECORD TO DROP ITS REPLAY';
   cb.textContent = 'CLEAR'; cb.classList.remove('arm');
   clearArmedAt = 0;
   const shape = t.minCornerRadius < 60 ? 'TECHNICAL' : t.minCornerRadius < 95 ? 'BALANCED' : 'FAST';
