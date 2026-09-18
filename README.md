@@ -554,6 +554,47 @@ each candidate, and because the generator discards whole candidates on retry, th
 came out at 43% dusk and 10% midday. Split out and warmed up, it sits within sampling noise of
 uniform over 400 seeds.
 
+### The look: snow, sky, road and trees
+
+A pass over everything the eye rests on, under one rule: no assets and no new lights, so each item
+is a canvas texture, a vertex colour, a sprite or a shader patch, and none of them moved the frame
+time outside the benchmark's noise.
+
+- **Snowflakes** were square points, which showed most in the mirror. They are now a soft radial
+  sprite. A blizzard flies 3,500 of them in a 130 m box — 2.3× the density it had, because the
+  first version read as a flurry — and a shade greyer than white: white flakes vanish against a
+  daylight blizzard sky, which only showed once every hour was checked against every weather.
+- **Snow grain.** The terrain was vertex colour alone and went flat up close. It now carries a
+  tiling grain drawn to a canvas from noise sampled on a torus, so the 12 m tile has no seam, with
+  the terrain's UVs in world metres; the ploughed banks get a coarser sheet of their own.
+- **The sky** is painted, per hour and weather, to a 1024×256 sheet wrapped on the dome: the hour's
+  gradient, then a cloud deck from the same torus noise so it closes around the horizon. The
+  weather sets the cover (a quarter on a CLEAR day, most of the sky in SNOW) and the hour tints the
+  cloud. The first thresholds produced no clouds at all; they are calibrated on the field's measured
+  percentiles instead of guessed. The sun is a sprite 2.8 km down the hour's sun direction — drawn
+  with ordinary blending, since an additive disc disappears on a bright sky — and the dome turns
+  slowly, so the clouds drift.
+- **Road wear.** Two darker bands per lane where tyres run, faded shoulders, a few cracks. At 13 %
+  it was invisible, at 24 % the road looked dirty, 17 % is what shipped.
+- **Rocks wear snow** on their upward faces, through vertex colours on the one shared geometry.
+- **Trees** come in two species now, the old cone and a three-tier fir, each instance tinted a
+  little differently. Snow caps hang from the apex rather than sitting at a fixed height, or a
+  short tree wears its cap as a collar.
+- **Headlights** are a lit lens and an additive pool of light laid on the road ahead, not lights:
+  half strength at dawn, off at midday, low at golden hour, nearly full at dusk — and on in any
+  tunnel whatever the hour.
+- **A distant range.** Two rings of peaks at 2.1 and 2.6 km, 240 teeth each from a massif-scale
+  swell, a ridge-scale noise and a per-tooth hash (the first pass alternated crest and col evenly
+  and read as a saw blade). The fog ends well inside them, so a fogged material would render as
+  exactly the fog colour and vanish; they ignore fog and are tinted instead from the current fog
+  colour and a mountain blue, again with every hour and weather: faint through snow, gone in a
+  blizzard. Two unlit draw calls.
+- **Wind in the trees.** A vertex patch on the instanced foliage: after the instance transform each
+  vertex leans downwind by its height above the tree's base, squared, so the trunk holds and the
+  crown moves, with a phase from where the tree stands and a slow gust on top. The amplitude is the
+  weather's wind — a breath on a clear day, half a metre at the crown in a blizzard. Caps ride
+  their trees; shadows stay still, which nobody can see at that wind.
+
 ### Slipstream
 
 Tuck in behind another car — within ~30 m and ~3.4 m laterally — and you punch into their hole in
@@ -621,7 +662,8 @@ finishing spread of **0.06 seconds** across two minutes of racing.
   is merged into one draw call per material. The paint is a metallic base under a clearcoat that reflects an environment map baked
   from the sky dome whenever the hour or weather changes, so golden hour glows on the bodywork.
 - **Terrain** — ridged fBm over a 280×280 grid, vertex-coloured for rock / snow / pine.
-- **Textures** — asphalt, kerbs and the chequered line are drawn to `<canvas>` at load.
+- **Textures** — asphalt and its wear, kerbs, the chequered line, the snow grain, the sky sheet,
+  the snowflake and the headlight pool are all drawn to `<canvas>` at load.
 - **Effects** — pooled GPU particles for tyre smoke and snow spray; skid marks are a ring buffer
   of 2400 quads that fade via a birth-time attribute in the shader (zero per-frame CPU cost).
 
