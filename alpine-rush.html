@@ -597,6 +597,7 @@
           <div class="k"><kbd>SHIFT</kbd> Boost</div>
           <div class="k"><kbd>C</kbd> Camera · <kbd>V</kbd> Mirror</div>
           <div class="k"><kbd>R</kbd> Respawn</div>
+          <div class="k"><kbd>I</kbd> Instant replay</div>
           <div class="k"><kbd>P</kbd> Pause · <kbd>M</kbd> Mute</div>
         </div>
         <div class="rowlbl dim">Drift to fill the boost meter · gamepad supported · Esc pauses</div>
@@ -624,6 +625,7 @@
     <h1 style="font-size:min(52px,8vw)">PAUSED</h1>
     <div class="sub">ENGINE IDLING</div>
     <button class="btn" id="resume">RESUME</button>
+    <button class="btn ghost" id="instant">INSTANT REPLAY</button>
     <button class="btn alt" id="quit">RESTART</button>
     <button class="btn ghost" id="tomenu">MAIN MENU</button>
   </div>
@@ -3174,6 +3176,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyC') Game.cycleCam();
   if (e.code === 'KeyV') { mirrorOn = !mirrorOn; Records.setPref('mirror', mirrorOn); toast(mirrorOn ? 'MIRROR ON' : 'MIRROR OFF', 900, '#35e6ff'); }
   if (e.code === 'KeyR') Game.respawn();
+  if (e.code === 'KeyI') Replay.openInstant();
   if (e.code === 'Enter' && Game.state === 'done') Game.advance();
 });
 addEventListener('keyup', e => { const k = KEYMAP[e.code]; if (k) { keys[k] = false; e.preventDefault(); } });
@@ -3789,7 +3792,7 @@ class Car {
         if (this.onTrack) {
           const idx = side > 0 ? 1 : 0, prev = this.lastSkid[idx];
           const ox = cy * 0.17, oz = -sy * 0.17;
-          if (prev && (Math.abs(prev.x - wx) + Math.abs(prev.z - wz)) > 0.35) {
+          if (prev && !Replay.instant && (Math.abs(prev.x - wx) + Math.abs(prev.z - wz)) > 0.35) {   // (an instant replay drives over its own marks)
             skidQuad(prev.x - ox, prev.y, prev.z - oz, prev.x + ox, prev.y, prev.z + oz,
                      wx - ox, wy + 0.045, wz - oz, wx + ox, wy + 0.045, wz + oz, t);
           }
@@ -4419,17 +4422,20 @@ const TapeStore = {
    Tape.read() and updateVisual() does the rest. The camera follows any car
    with the race's own chase, hood and cinema modes; TV is the director. */
 const RP_CAMS = ['TV', 'CHASE', 'HOOD', 'CINEMA'], RP_SPEEDS = [0.25, 0.5, 1, 2];
+const INSTANT_S = 10;                          // how far back an instant replay starts
+const RP_HELP = 'SPACE · ←→ · C · N · 1-4 · ESC';
 const Replay = {
   t: 0, speed: 1, playing: false, cam: 0, follow: 0, from: null, seeking: false,
   st: [], marks: false,
   get car() { return cars[this.follow]; },
   get length() { return Tape.seconds; },
-  open() {
+  open(at = 0) {
     if (Tape.n < TAPE_HZ) { toast('NO REPLAY YET', 900); return; }
     this.from = Game.state;                                    // what to go back to
-    Tape.stop();
+    if (!this.instant) Tape.stop();                            // (an instant replay's tape carries on afterwards)
     Game.state = 'replay';
-    this.t = 0; this.playing = true; this.follow = 0; this.seeking = true;
+    $('rphelp').textContent = this.instant ? RP_HELP + ' · BACK TO THE RACE' : RP_HELP;
+    this.t = at; this.playing = true; this.follow = 0; this.seeking = true;
     this.st = cars.map(() => ({}));
     el.hud.classList.remove('on');
     $('results').classList.add('hide'); $('pause').classList.add('hide');
@@ -4444,6 +4450,17 @@ const Replay = {
     $('replay').classList.add('hide');
     Sfx.silence();
     cars.forEach(c => { c.view.visible = true; });
+    if (this.instant) {                                        // back under the race, exactly as it was left
+      const L = this.live; this.live = null; this.instant = false;
+      cars.forEach((c, i) => { c.restore(L.snaps[i]); c.updateVisual(0.016, Game.now); });
+      camMode = L.camMode; camPos.copy(L.camPos); camLook.copy(L.camLook);
+      player.view.visible = camMode !== 1;
+      camera.position.copy(camPos); camera.lookAt(camLook); camera.fov = fov; camera.updateProjectionMatrix();
+      Game.paused = 'race'; Game.state = 'paused';
+      el.hud.classList.add('on'); $('pause').classList.remove('hide');
+      Sfx.suspend();
+      return;
+    }
     if (this.from === 'menu') {                                // a saved race: back to the title as it was
       const m = this.menu; this.menu = null;
       timeChoice = m.time; wxChoice = m.wx;
@@ -4458,6 +4475,23 @@ const Replay = {
     Game.state = 'done';
     if (Game.resultCard) Game.showResults(Game.resultCard.rank);
     Sfx.startMusic();
+  },
+  /* mid-race: the last INSTANT_S seconds through the same director, the race
+     frozen underneath. The tape is only read - Replay.update() poses the live
+     cars, so every car is snapshotted first and restored on the way out, and
+     since neither the physics clock nor the tape moved meanwhile, recording
+     picks up exactly where it stopped. It ends on the PAUSED card, never back
+     in the car at speed. */
+  instant: false, live: null,
+  openInstant() {
+    const racing = Game.state === 'race' || (Game.state === 'paused' && Game.paused === 'race');
+    if (!racing) return;
+    if (Tape.n < TAPE_HZ * 2) { toast('NOTHING TO REPLAY YET', 900); return; }
+    this.live = { snaps: cars.map(c => c.snapshot()), camMode, camPos: camPos.clone(), camLook: camLook.clone() };
+    this.instant = true;
+    if (Ghost.mesh) Ghost.mesh.visible = false;                // it would stand frozen in the shot
+    this.open(Math.max(0, Tape.seconds - INSTANT_S));
+    toast(`INSTANT REPLAY · LAST ${Math.round(Math.min(INSTANT_S, Tape.seconds))} S`, 1400, '#35e6ff');
   },
   /* the seed's saved record race, from the title screen: the tape's own hour
      and weather (the title may be previewing others) and the cars as they
@@ -4546,7 +4580,7 @@ const Replay = {
   update(dt) {
     if (this.playing) {
       this.t += dt * this.speed;
-      if (this.t >= this.length) { this.t = this.length; this.playing = false; }
+      if (this.t >= this.length) { this.t = this.length; this.playing = false; if (this.instant) { this.close(); return; } }   // caught up with the present
       $('rptime').textContent = fmt(this.t * 1000).slice(0, -2);
       $('rpfill').style.width = (100 * this.t / Math.max(this.length, 0.01)).toFixed(2) + '%';
       if (!this.playing) this.refresh();
@@ -5749,6 +5783,7 @@ $('go').addEventListener('click', () => {
 $('again').addEventListener('click', () => Game.advance());
 $('watch').addEventListener('click', () => Replay.open());
 $('watchrec').addEventListener('click', () => Replay.openSaved());
+$('instant').addEventListener('click', () => Replay.openInstant());
 window.addEventListener('pagehide', () => Tape.stop());       // a record race on the tape is not lost to a reload
 $('rpplay').addEventListener('click', () => Replay.toggle());
 $('rptrack').addEventListener('click', e => {

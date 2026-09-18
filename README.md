@@ -137,6 +137,7 @@ A record is still per circuit, but it remembers which car set it.
 | `V` | Rear-view mirror on / off |
 | `Space` `←` `→` `C` `N` `1`–`4` `Esc` | In a replay: pause, seek 5 s, camera, next car, speed, exit |
 | `R` | Respawn on the racing line |
+| `I` | Instant replay: the last ten seconds, then back to the PAUSED card |
 | `P` or `ESC` | Pause · `M` Mute |
 
 **MAIN MENU** on the pause and results screens returns to the title without reloading, so you can
@@ -246,6 +247,16 @@ keeps the car the same size on screen, so it goes long on the straights. **C** c
 hood → cinema; **N** follows the next car. **Space** pauses, **←/→** seek 5 s, **1–4** set the speed
 from ¼× to 2×, click the timeline to scrub (the ticks are laps and finishes in each car's colour),
 **Esc** returns to the results card.
+
+**Instant replay.** **I** in the middle of a race (or INSTANT REPLAY on the pause card) freezes
+it and plays the last ten seconds through the same director, with every replay control live, so
+you can scrub further back or slow it down. Playing a tape poses the live cars, so each car is
+snapshotted on the way in and restored on the way out — every physics field comes back identical,
+and since neither the physics clock nor the tape moved in between, recording resumes without a seam
+(measured: the taped steps across the junction run 1.53 → 1.62 m, no jump). It always ends on the
+PAUSED card, when the replay catches up with the present or on **Esc**, never back in the car at
+speed. Skid marks are not laid a second time, and a cup's no-retries rule is untouched: nothing
+about the race changes.
 
 The race that set your record on a circuit is kept. When a lap beats your best and you go on to take
 the flag, the tape is written to IndexedDB under the seed (about 150–230 KB packed: every value
