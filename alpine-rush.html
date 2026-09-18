@@ -316,10 +316,19 @@
   .mbtn{ padding:8px 18px; font-size:10.5px; }
   .mbtn.sel{ background:var(--am); border-color:var(--am); box-shadow:0 0 20px rgba(255,204,51,.45); }
   #seedin:disabled, #reroll:disabled{ opacity:.45; pointer-events:none; }
-  #featured{ display:flex; gap:6px; justify-content:center; align-items:center; flex-wrap:wrap; margin-top:9px; }
+  #featured{ display:flex; gap:5px; justify-content:center; align-items:center; flex-wrap:wrap; margin-top:9px; }
   #featured.hide{ display:none; }
   #featured .lbl{ letter-spacing:.24em; margin-right:4px; }
-  .fbtn{ padding:6px 10px; font-size:9.5px; letter-spacing:.16em; }
+  .fbtn{ padding:6px 9px; font-size:9.5px; letter-spacing:.16em; }
+  /* six cups fit one row only while the card is near full width (about 720 px
+     of viewport); below that a free wrap leaves one button orphaned on a second
+     line, so the label takes its own row and the cups break evenly: threes,
+     then twos on a phone */
+  @media (max-width:740px){
+    #featured{ display:grid; grid-template-columns:repeat(3,auto); }
+    #featured .lbl{ grid-column:1/-1; margin:0 0 1px; }
+  }
+  @media (max-width:430px){ #featured{ grid-template-columns:repeat(2,auto); } }
   .fbtn.sel{ background:transparent; color:var(--am); border-color:var(--am); box-shadow:none; font-weight:700; }
   #featured.locked .fbtn{ opacity:.3; pointer-events:none; }
   #cupinfo{ margin-top:7px; font-size:10.5px; letter-spacing:.19em; color:rgba(255,204,51,.75); min-height:14px; }
